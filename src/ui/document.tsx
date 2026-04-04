@@ -130,6 +130,17 @@ export function AppDocument({
       })();
       node.textContent = out;
     });
+    document.querySelectorAll('[data-local-auction-date]').forEach((node) => {
+      const value = node.getAttribute('data-local-auction-date');
+      if (!value || value === 'future' || !value.includes('T')) return;
+      const target = new Date(value);
+      if (Number.isNaN(target.getTime())) return;
+      node.textContent = new Intl.DateTimeFormat(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      }).format(target) + ' local';
+    });
     document.querySelectorAll('[data-generated-at]').forEach((node) => {
       const value = node.getAttribute('data-generated-at');
       if (!value) return;
@@ -175,6 +186,29 @@ export function AppDocument({
       }, 1200);
     } catch {}
   });
+  const applyFilter = (filter) => {
+    document.querySelectorAll('#main-body tr[data-car]').forEach((row) => {
+      if (filter === 'all' || row.getAttribute('data-car') === filter) {
+        row.classList.remove('hidden');
+      } else {
+        row.classList.add('hidden');
+      }
+    });
+  };
+  document.querySelectorAll('.tab[data-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('.tab[data-filter]').forEach((node) => {
+        node.classList.remove('active');
+        node.classList.remove('border-border', 'text-foreground');
+        node.classList.add('border-transparent', 'text-muted-foreground');
+      });
+      button.classList.add('active');
+      button.classList.remove('border-transparent', 'text-muted-foreground');
+      button.classList.add('border-border', 'text-foreground');
+      applyFilter(button.getAttribute('data-filter') || 'all');
+    });
+  });
+  applyFilter('Tesla Model 3');
   if ('EventSource' in window) {
     const source = new EventSource('/events');
     source.addEventListener('collector_sync', (event) => {

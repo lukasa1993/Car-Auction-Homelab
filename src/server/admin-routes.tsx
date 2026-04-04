@@ -1,28 +1,69 @@
+import { dispatchAuthRequest, forwardSetCookieHeaders } from "../lib/auth";
 import type { AuthState, ServerServices } from "./context";
 import { parseLotActionPath, parseTargetForm } from "./forms";
-import { redirect, renderPage } from "./responses";
+import { authRedirectFromResponse, redirect, renderPage } from "./responses";
 import { AdminPage } from "../ui/pages/admin-page";
+import { AuthPage } from "../ui/pages/auth-page";
 
 export async function handleAdminPages(
   request: Request,
   pathname: string,
+  url: URL,
   authState: AuthState,
   services: ServerServices,
 ): Promise<Response | null> {
   if (pathname === "/admin" && request.method === "GET") {
     if (!authState.signedIn) {
-      return redirect("/login");
+      return renderPage(
+        "Admin Sign In",
+        <AuthPage
+          error={url.searchParams.get("error")}
+          mode={url.searchParams.get("mode") === "signup" ? "signup" : "signin"}
+        />,
+      );
     }
     if (!authState.admin || !authState.email) {
-      return redirect("/login?error=Admin%20access%20required");
+      return renderPage(
+        "Admin Sign In",
+        <AuthPage
+          error="Admin access required"
+          mode={url.searchParams.get("mode") === "signup" ? "signup" : "signin"}
+        />,
+      );
     }
     return renderPage("Admin", <AdminPage email={authState.email} targets={services.store.getVinTargets()} />);
+  }
+
+  if (pathname === "/admin/login" && request.method === "POST") {
+    const form = await request.formData();
+    const response = await dispatchAuthRequest("/api/auth/sign-in/email", request, {
+      email: String(form.get("email") || ""),
+      password: String(form.get("password") || ""),
+    });
+    return await authRedirectFromResponse(response, "/admin", "/admin");
+  }
+
+  if (pathname === "/admin/signup" && request.method === "POST") {
+    const form = await request.formData();
+    const response = await dispatchAuthRequest("/api/auth/sign-up/email", request, {
+      name: String(form.get("name") || ""),
+      email: String(form.get("email") || ""),
+      password: String(form.get("password") || ""),
+    });
+    return await authRedirectFromResponse(response, "/admin", "/admin?mode=signup");
+  }
+
+  if (pathname === "/admin/logout" && request.method === "POST") {
+    const response = await dispatchAuthRequest("/api/auth/sign-out", request);
+    const headers = new Headers({ location: "/admin" });
+    forwardSetCookieHeaders(response, headers);
+    return new Response(null, { status: 302, headers });
   }
 
   const lotAction = parseLotActionPath(pathname);
   if (lotAction && request.method === "POST") {
     if (!authState.admin || !authState.email) {
-      return redirect("/login?error=Admin%20access%20required");
+      return redirect("/admin?error=Admin%20access%20required");
     }
     const form = await request.formData();
     const redirectTo = String(form.get("redirect") || "/");
@@ -37,7 +78,7 @@ export async function handleAdminPages(
 
   if (pathname === "/admin/targets" && request.method === "POST") {
     if (!authState.admin) {
-      return redirect("/login?error=Admin%20access%20required");
+      return redirect("/admin?error=Admin%20access%20required");
     }
     const form = await request.formData();
     services.store.upsertVinTarget(parseTargetForm(form));
@@ -47,7 +88,7 @@ export async function handleAdminPages(
   const targetUpdateMatch = pathname.match(/^\/admin\/targets\/([^/]+)$/);
   if (targetUpdateMatch && request.method === "POST") {
     if (!authState.admin) {
-      return redirect("/login?error=Admin%20access%20required");
+      return redirect("/admin?error=Admin%20access%20required");
     }
     const form = await request.formData();
     const payload = parseTargetForm(form, { id: decodeURIComponent(targetUpdateMatch[1]) });

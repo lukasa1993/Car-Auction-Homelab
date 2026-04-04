@@ -49,7 +49,7 @@ export async function handleRequest(request: Request, services: ServerServices):
     return entityResponse;
   }
 
-  const adminResponse = await handleAdminPages(request, pathname, authState, services);
+  const adminResponse = await handleAdminPages(request, pathname, url, authState, services);
   if (adminResponse) {
     return adminResponse;
   }
