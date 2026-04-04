@@ -11,7 +11,6 @@ RUN cd collector && bun install --frozen-lockfile
 COPY src ./src
 COPY scripts ./scripts
 
-RUN bun run styles:build
 ARG TARGETARCH
 RUN bun run build:server:bin --arch=${TARGETARCH}
 RUN cd collector && bun run build
@@ -24,6 +23,7 @@ RUN apk add --no-cache ca-certificates libstdc++
 
 COPY --from=builder /src/dist/auction /app/auction
 COPY --from=builder /src/public/app.css /app/public/app.css
+COPY --from=builder /src/public/app.js /app/public/app.js
 COPY --from=builder /src/collector/dist /app/collector/dist
 
 ENV NODE_ENV=production

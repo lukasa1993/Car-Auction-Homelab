@@ -39,6 +39,15 @@ export function ensureAppCss(config: ServerConfig): void {
 
 export function ensureAppClient(config: ServerConfig): void {
   mkdirSync(config.publicDir, { recursive: true });
+  const outputExists = existsSync(config.appJsOutput);
+  const sourceExists = existsSync(config.appJsSource);
+
+  if (!sourceExists && outputExists) {
+    return;
+  }
+  if (!sourceExists && !outputExists) {
+    throw new Error(`Missing built JS at ${config.appJsOutput}`);
+  }
 
   const build = Bun.spawnSync(
     [
