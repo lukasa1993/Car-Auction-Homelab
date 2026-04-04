@@ -736,10 +736,12 @@ async function fetchCopartApiPage(page: Page, vinPrefix: string, pageIndex: numb
 function collectImageUrlsFromValue(value: unknown, results: Set<string>, baseOrigin: string, keyHint = ""): void {
   if (typeof value === "string") {
     const trimmed = value.trim();
+    const normalizedKeyHint = keyHint.toLowerCase();
     const looksLikeImage =
-      /(image|img|thumb|photo|hero|gallery)/i.test(keyHint) ||
+      /(image|img|thumb|photo|hero|gallery|iconurl|full|preview|url)/i.test(normalizedKeyHint) ||
       /\.(?:jpe?g|png|webp|avif|gif)(?:[?#].*)?$/i.test(trimmed) ||
-      /\/image/i.test(trimmed);
+      /\/image/i.test(trimmed) ||
+      (/^https?:\/\//i.test(trimmed) && /(copart|iaai|auction)/i.test(trimmed) && /(cdn-cgi\/image|media|thumb|photo|img)/i.test(trimmed));
     if (!looksLikeImage) {
       return;
     }
@@ -761,7 +763,8 @@ function collectImageUrlsFromValue(value: unknown, results: Set<string>, baseOri
     return;
   }
   for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    collectImageUrlsFromValue(nested, results, baseOrigin, key);
+    const nextKeyHint = keyHint ? `${keyHint}.${key}` : key;
+    collectImageUrlsFromValue(nested, results, baseOrigin, nextKeyHint);
   }
 }
 
@@ -941,14 +944,22 @@ function extractImageCandidatesFromHtml(html: string, baseUrl: string): string[]
 
 async function collectPageImageCandidates(page: Page): Promise<string[]> {
   return await page.evaluate(() => {
-    const attrs = ["src", "data-src", "data-lazy", "data-zoom-image", "data-fullimage", "data-original"];
+    const attrs = ["src", "srcset", "data-src", "data-lazy", "data-zoom-image", "data-fullimage", "data-original"];
     const urls = new Set<string>();
-    for (const element of Array.from(document.querySelectorAll("img, source, a"))) {
+    for (const element of Array.from(document.querySelectorAll("img, source, a, meta"))) {
       for (const attr of attrs) {
         const value = element.getAttribute(attr);
         if (value) {
-          urls.add(value);
+          for (const candidate of value.split(",")) {
+            const normalized = candidate.trim().split(/\s+/)[0];
+            if (normalized) {
+              urls.add(normalized);
+            }
+          }
         }
+      }
+      if (element instanceof HTMLMetaElement && element.content) {
+        urls.add(element.content);
       }
       if (element instanceof HTMLAnchorElement && element.href && /\.(?:jpe?g|png|webp|avif|gif)(?:[?#].*)?$/i.test(element.href)) {
         urls.add(element.href);
@@ -985,47 +996,50 @@ async function enrichRecordImages(page: Page, item: ScrapedRecordWithImages): Pr
 }
 
 async function fetchImagePayload(page: Page, imageUrl: string): Promise<{ sourceUrl: string; mimeType: string; width: number | null; height: number | null; dataBase64: string } | null> {
-  const payload = await page.evaluate(async (url) => {
-    try {
-      const response = await fetch(url, { credentials: "include" });
-      if (!response.ok) {
-        return null;
-      }
-      const mimeType = response.headers.get("content-type") || "application/octet-stream";
-      const buffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      const chunkSize = 0x8000;
-      for (let index = 0; index < bytes.length; index += chunkSize) {
-        binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-      }
-      return {
-        mimeType,
-        dataBase64: btoa(binary),
-      };
-    } catch {
+  try {
+    const cookies = await page.context().cookies(imageUrl);
+    const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+    const response = await fetch(imageUrl, {
+      headers: {
+        "user-agent": DEFAULT_HTTP_USER_AGENT,
+        accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        referer: page.url() || "https://www.copart.com/",
+        ...(cookieHeader ? { cookie: cookieHeader } : {}),
+      },
+    });
+    if (!response.ok) {
       return null;
     }
-  }, imageUrl).catch(() => null) as { mimeType: string; dataBase64: string } | null;
-  if (!payload?.dataBase64) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length === 0) {
+      return null;
+    }
+    const mimeType = response.headers.get("content-type") || "application/octet-stream";
+    return {
+      sourceUrl: imageUrl,
+      mimeType,
+      width: null,
+      height: null,
+      dataBase64: Buffer.from(bytes).toString("base64"),
+    };
+  } catch {
     return null;
   }
-  return {
-    sourceUrl: imageUrl,
-    mimeType: payload.mimeType,
-    width: null,
-    height: null,
-    dataBase64: payload.dataBase64,
-  };
 }
 
 async function uploadImages(baseUrl: string, token: string, runId: string, page: Page, items: ScrapedRecordWithImages[]): Promise<void> {
   for (const item of items) {
     const enriched = await enrichRecordImages(page, item);
+    if (enriched.imageCandidates.length === 0) {
+      console.warn(`No image candidates for ${item.record.sourceKey} lot ${item.record.lotNumber} ${item.record.url}`);
+      continue;
+    }
     let sortOrder = 0;
+    let uploadedCount = 0;
     for (const imageUrl of enriched.imageCandidates.slice(0, 8)) {
       const payload = await fetchImagePayload(page, imageUrl);
       if (!payload) {
+        console.warn(`Image fetch failed for lot ${item.record.lotNumber}: ${imageUrl}`);
         continue;
       }
       await fetch(`${baseUrl}/api/ingest/image`, {
@@ -1047,6 +1061,12 @@ async function uploadImages(baseUrl: string, token: string, runId: string, page:
         }),
       }).catch(() => {});
       sortOrder += 1;
+      uploadedCount += 1;
+    }
+    if (uploadedCount === 0) {
+      console.warn(
+        `Found ${enriched.imageCandidates.length} image candidates but uploaded 0 for lot ${item.record.lotNumber}`,
+      );
     }
   }
 }
