@@ -6,6 +6,19 @@ import { createAuthDatabase } from "../models/auth-database";
 
 const baseUrl = (process.env.AUCTION_BASE_URL || process.env.BETTER_AUTH_URL || "http://localhost:3005").replace(/\/$/, "");
 const databasePath = process.env.AUCTION_SQLITE_PATH || `${process.cwd()}/data/auction.sqlite`;
+const baseOrigin = new URL(baseUrl).origin;
+const extraTrustedOrigins = String(process.env.AUCTION_TRUSTED_ORIGINS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const localDevOrigins = [
+  "http://localhost:3005",
+  "http://127.0.0.1:3005",
+  "http://localhost",
+  "http://127.0.0.1",
+];
+const trustedOrigins = [...new Set([baseOrigin, ...localDevOrigins, ...extraTrustedOrigins])];
+const useSecureCookies = String(process.env.AUCTION_USE_SECURE_COOKIES || "false").toLowerCase() === "true";
 const secret =
   process.env.BETTER_AUTH_SECRET ||
   process.env.AUCTION_AUTH_SECRET ||
@@ -16,6 +29,8 @@ const adminEmailAllowlist = new Set(
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean),
 );
+const bootstrapAdminEmail = [...adminEmailAllowlist][0] ?? null;
+const bootstrapAdminPassword = process.env.AUCTION_ADMIN_PASSWORD || null;
 
 const authDatabase = createAuthDatabase(databasePath);
 
@@ -29,8 +44,9 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     maxPasswordLength: 128,
   },
-  trustedOrigins: [baseUrl],
+  trustedOrigins,
   advanced: {
+    useSecureCookies,
     database: {
       generateId: () => crypto.randomUUID(),
     },
@@ -40,6 +56,7 @@ export const auth = betterAuth({
 export async function ensureBetterAuthSchema(): Promise<void> {
   const { runMigrations } = await getMigrations(auth.options);
   await runMigrations();
+  await ensureBootstrapAdminUser();
 }
 
 export async function getAuthState(request: Request): Promise<{
@@ -77,11 +94,7 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 }
 
 export async function dispatchAuthRequest(pathname: string, request: Request, body?: unknown): Promise<Response> {
-  const headers = new Headers();
-  const cookie = request.headers.get("cookie");
-  if (cookie) {
-    headers.set("cookie", cookie);
-  }
+  const headers = new Headers(request.headers);
   if (body !== undefined) {
     headers.set("content-type", "application/json");
   }
@@ -115,4 +128,34 @@ export function requireBearer(request: Request, expectedToken: string): boolean 
     return false;
   }
   return authorization.slice("Bearer ".length).trim() === expectedToken;
+}
+
+async function ensureBootstrapAdminUser(): Promise<void> {
+  if (!bootstrapAdminEmail || !bootstrapAdminPassword) {
+    return;
+  }
+
+  const response = await auth.handler(
+    new Request(`${baseUrl}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: baseOrigin,
+      },
+      body: JSON.stringify({
+        name: bootstrapAdminEmail.split("@")[0],
+        email: bootstrapAdminEmail,
+        password: bootstrapAdminPassword,
+      }),
+    }),
+  );
+
+  if (response.ok || response.status === 422) {
+    return;
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Failed to bootstrap admin user ${bootstrapAdminEmail}: ${response.status} ${body}`);
+  }
 }

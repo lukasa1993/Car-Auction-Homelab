@@ -29,7 +29,24 @@ bun src/server.tsx
 
 The service listens on `http://localhost:3005` by default.
 
-The first startup runs Better Auth migrations programmatically on the same SQLite database and builds the collector runtime into `collector/dist`.
+The first startup:
+
+- runs Better Auth migrations programmatically on the same SQLite database
+- bootstraps the initial admin user for `AUCTION_ADMIN_EMAILS`
+- uses `AUCTION_ADMIN_PASSWORD` as that initial account password
+- builds the collector runtime into `collector/dist`
+
+Default auth cookie mode is dual-use:
+
+- works on local `http://localhost:3005`
+- works on local `http://127.0.0.1:3005`
+- works on production `https://auc.ldev.cloud`
+
+If you want strict HTTPS-only cookies later, set:
+
+```env
+AUCTION_USE_SECURE_COOKIES=true
+```
 
 ## Collector Signing Keys
 
@@ -47,6 +64,10 @@ The script writes:
 - `.env`
 - `runner-keys/collector-signing-key.pem`
 - `runner-keys/collector-signing-key.pub.pem`
+- `AUCTION_ADMIN_EMAILS=luka@lnh.ge`
+- `AUCTION_ADMIN_PASSWORD=<generated>` which is also the initial Better Auth password for `luka@lnh.ge`
+- `AUCTION_TRUSTED_ORIGINS=` for any extra allowed browser origins beyond the built-in local defaults
+- `AUCTION_USE_SECURE_COOKIES=false`
 
 Useful flags:
 
@@ -133,6 +154,7 @@ bun run setup:env --base-url https://auc.ldev.cloud
    - `.env`
    - `runner-keys/collector-signing-key.pem`
    - `runner-keys/collector-signing-key.pub.pem`
+   - the generated `.env` already contains `AUCTION_ADMIN_EMAILS=luka@lnh.ge`
 
 3. On the Mac mini, create directories:
 
@@ -189,5 +211,5 @@ handle @auction_report {
 - Copart and IAAI image extraction is best-effort and browser-backed.
 - Manual management for VIN targets exists in `/admin`, but it is still intentionally minimal.
 - There is no dedicated scheduler container yet; the expected production pattern is cron invoking the collector bootstrap on chosen machines.
-- If `AUCTION_ADMIN_EMAILS` is not set, any signed-in user is treated as admin. That fallback is useful for local setup but should be tightened in production.
+- If you need more than one admin later, extend `AUCTION_ADMIN_EMAILS` in `.env` as a comma-separated list.
 - Watchtower updates assume the Mac mini can authenticate to GHCR and track `ghcr.io/<owner>/<repo>:latest`.
