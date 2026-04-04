@@ -14,7 +14,7 @@ This replaces the old static report writer with a centralized Bun + SQLite servi
 
 ## Important Rules
 
-- SQLite lives only on the Mac mini. Remote scrapers never write to the DB directly.
+- SQLite lives only on the auction host. Remote scrapers never write to the DB directly.
 - Manual `removed` workflow state does not get resurrected by scraper ingests.
 - Source state still updates on removed lots, including date changes and missing/canceled transitions.
 - IAAI `Stock#` is treated as the canonical lot number.
@@ -156,9 +156,9 @@ The workflow publishes on:
 
 It uses the built-in `GITHUB_TOKEN` with `packages: write`, so no extra registry secret is needed for publishing.
 
-## Mac Mini Deployment
+## Auction Deployment
 
-The Mac mini should pull the published GHCR image. The repo checkout only provides the Compose file and deployment notes.
+The auction host should pull the published GHCR image. The repo checkout only provides the Compose file and deployment notes.
 
 1. On your local machine, generate the runtime env and signing keys:
 
@@ -169,13 +169,13 @@ bun run setup:env \
 bun run collector:release
 ```
 
-2. Copy the runtime material to the Mac mini:
+2. Copy the runtime material to the auction host:
    - `.env`
    - `runner-keys/collector-signing-key.pem`
    - `runner-keys/collector-signing-key.pub.pem`
    - `collector/release/*` must be committed and pushed so GitHub raw serves the same signed files
 
-3. On the Mac mini, create directories:
+3. On the auction host, create directories:
 
 ```bash
 mkdir -p /Users/l/_APPS/auction/data
@@ -183,7 +183,7 @@ mkdir -p /Users/l/_APPS/auction/runner-keys
 mkdir -p /Users/l/_APPS/auction
 ```
 
-4. Clone the repo on the Mac mini:
+4. Clone the repo on the auction host:
 
 ```bash
 git clone https://github.com/lukasa1993/Car-Auction-Homelab.git /Users/l/_APPS/auction/repo
@@ -201,8 +201,8 @@ cp runner-keys/collector-signing-key.pub.pem /Users/l/_APPS/auction/runner-keys/
 
 ```bash
 cd /Users/l/_APPS/auction/repo
-AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/mac-mini/compose.yml pull
-AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/mac-mini/compose.yml up -d
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/auction/compose.yml pull
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/auction/compose.yml up -d
 ```
 
 By default the Compose file uses:
@@ -217,11 +217,11 @@ To pin a different tag or digest temporarily:
 cd /Users/l/_APPS/auction/repo
 AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
 AUCTION_IMAGE=ghcr.io/lukasa1993/car-auction-homelab:<tag-or-digest> \
-/usr/local/bin/docker compose -f deploy/mac-mini/compose.yml pull
+/usr/local/bin/docker compose -f deploy/auction/compose.yml pull
 
 AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
 AUCTION_IMAGE=ghcr.io/lukasa1993/car-auction-homelab:<tag-or-digest> \
-/usr/local/bin/docker compose -f deploy/mac-mini/compose.yml up -d
+/usr/local/bin/docker compose -f deploy/auction/compose.yml up -d
 ```
 
 7. Change the live `auc.ldev.cloud` Caddy block from static `root * /Users/l/_APPS/caddy/site/auc.ldev.cloud` to a reverse proxy to `127.0.0.1:3005`.
@@ -255,5 +255,5 @@ rm -rf /Users/l/_APPS/caddy/site/auc.ldev.cloud
 - There is no dedicated scheduler container yet; the expected production pattern is cron invoking the collector bootstrap on chosen machines.
 - If you need more than one admin later, extend `AUCTION_ADMIN_EMAILS` in `.env` as a comma-separated list.
 - `collector/release/*` must be regenerated and pushed whenever the collector runtime changes.
-- `latest` only reflects the default branch. If the Mac mini needs a pre-merge image, publish and pin a non-`latest` tag first.
+- `latest` only reflects the default branch. If the auction host needs a pre-merge image, publish and pin a non-`latest` tag first.
 - The app can still serve `/collector/runtime/*` for local development or fallback updates.

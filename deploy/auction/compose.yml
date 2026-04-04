@@ -1,3 +1,5 @@
+name: auction
+
 services:
   auction:
     container_name: auction

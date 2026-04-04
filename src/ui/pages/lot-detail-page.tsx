@@ -146,7 +146,7 @@ export function LotDetailPage({
           <Card className="bg-card/90">
             <CardHeader>
               <CardTitle className="font-display text-2xl tracking-[-0.03em]">Stored images</CardTitle>
-              <CardDescription>Server-owned media files mounted from the Mac mini volume.</CardDescription>
+              <CardDescription>Server-owned media files mounted from the auction host volume.</CardDescription>
             </CardHeader>
             <CardContent>
               {detail.images.length > 0 ? (
