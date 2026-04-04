@@ -1,0 +1,15 @@
+services:
+  auction:
+    container_name: auction
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: car-auction-homelab:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3005:3005"
+    env_file:
+      - ${AUCTION_RUNTIME_DIR:-/Users/l/_APPS/auction}/.env
+    volumes:
+      - ${AUCTION_RUNTIME_DIR:-/Users/l/_APPS/auction}/data:/app/data
+      - ${AUCTION_RUNTIME_DIR:-/Users/l/_APPS/auction}/runner-keys:/app/runner-keys:ro

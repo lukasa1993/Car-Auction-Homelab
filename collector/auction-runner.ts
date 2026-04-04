@@ -64,6 +64,7 @@ interface CoveredScope {
 
 interface RunnerArgs {
   baseUrl: string;
+  updateBaseUrl: string;
   siteKeys: SourceKey[];
   headless: boolean;
   unattended: boolean;
@@ -203,8 +204,15 @@ function parseArgs(argv: string[]): RunnerArgs {
     throw new Error("No valid sites selected. Use --site copart,iaai");
   }
   const baseUrlArg = argv.indexOf("--base-url");
+  const updateBaseUrlArg = argv.indexOf("--update-base-url");
+  const baseUrl = (baseUrlArg !== -1 ? argv[baseUrlArg + 1] : process.env.AUCTION_BASE_URL || "https://auc.ldev.cloud").replace(/\/$/, "");
   return {
-    baseUrl: (baseUrlArg !== -1 ? argv[baseUrlArg + 1] : process.env.AUCTION_BASE_URL || "https://auc.ldev.cloud").replace(/\/$/, ""),
+    baseUrl,
+    updateBaseUrl: (
+      updateBaseUrlArg !== -1
+        ? argv[updateBaseUrlArg + 1]
+        : process.env.AUCTION_COLLECTOR_UPDATE_BASE_URL || `${baseUrl}/collector/runtime`
+    ).replace(/\/$/, ""),
     siteKeys: [...siteKeys],
     headless: argv.includes("--headless") || argv.includes("--unattended"),
     unattended: argv.includes("--unattended"),
@@ -504,7 +512,7 @@ async function fetchText(url: string, options: RequestInit = {}): Promise<string
 }
 
 async function fetchRemoteManifest(baseUrl: string): Promise<RunnerManifest> {
-  return await fetchJson<RunnerManifest>(`${baseUrl}/collector/manifest.json`, {
+  return await fetchJson<RunnerManifest>(`${baseUrl}/manifest.json`, {
     headers: { "cache-control": "no-store" },
   });
 }
@@ -1107,7 +1115,7 @@ async function main(): Promise<void> {
     throw new Error("Set AUCTION_INGEST_TOKEN before running the scraper.");
   }
 
-  await verifyRunnerFreshness(args.baseUrl);
+  await verifyRunnerFreshness(args.updateBaseUrl);
   const config = await fetchScrapeConfig(args.baseUrl, ingestToken);
   const activeTargets = config.targets.filter((target) => target.active);
   console.log(`Loaded ${activeTargets.length} VIN targets from ${args.baseUrl} (config ${config.configVersion}).`);

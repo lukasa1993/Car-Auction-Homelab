@@ -14,6 +14,8 @@ bun run bootstrap --base-url https://auc.ldev.cloud --site copart,iaai --headles
 
 `bootstrap` and `collect` both build minified JavaScript first and then execute the built `dist/*.js` entrypoints.
 
+If collector updates are served from GitHub raw instead of the app origin, set `AUCTION_COLLECTOR_UPDATE_BASE_URL` or pass `--update-base-url`.
+
 For local direct execution without the bootstrap:
 
 ```bash

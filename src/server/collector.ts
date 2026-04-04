@@ -7,7 +7,7 @@ import type { ServerConfig } from "./config";
 export function buildCollectorManifest(config: ServerConfig) {
   return buildRunnerManifest({
     runnerDir: config.collectorRuntimeDir,
-    baseUrl: config.baseUrl,
+    baseUrl: config.collectorUpdateBaseUrl,
     version: config.collectorVersion,
     minimumSupportedVersion: config.minimumSupportedCollectorVersion,
   });

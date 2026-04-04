@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "setup:env": "bun scripts/generate-env.ts",
+    "collector:release": "bun scripts/publish-collector-release.ts",
     "styles:build": "bunx @tailwindcss/cli -i ./src/styles/app.css -o ./public/app.css --minify",
     "build:server:bin": "bun scripts/build-server-executable.ts",
     "dev": "bun run styles:build && bun --watch src/server.tsx",

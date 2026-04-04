@@ -17,6 +17,7 @@ export async function handleApiRoutes(
     }
     return Response.json({
       baseUrl: services.config.baseUrl,
+      collectorUpdateBaseUrl: services.config.collectorUpdateBaseUrl,
       collectorVersion: services.config.collectorVersion,
       ...services.store.getScrapeConfig(),
     });

@@ -1,0 +1,14 @@
+{
+  "name": "lnh-auction-collector-runtime",
+  "private": true,
+  "type": "module",
+  "version": "2026.04.04.1",
+  "scripts": {
+    "bootstrap": "bun bootstrap.js",
+    "collect": "bun auction-runner.js"
+  },
+  "dependencies": {
+    "luxon": "3.7.2",
+    "playwright": "1.58.2"
+  }
+}

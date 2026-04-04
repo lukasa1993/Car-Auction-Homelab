@@ -9,7 +9,7 @@ This replaces the old static report writer with a centralized Bun + SQLite servi
 - Stores VIN targets in SQLite so scrapers fetch scope from the server.
 - Stores lots, snapshots, manual actions, and images in SQLite plus a mounted media volume.
 - Uses Better Auth for session-backed sign-in and sign-up.
-- Serves a signed collector manifest from `/collector/*`.
+- Serves a signed collector manifest from `/collector/runtime/*`.
 - Lets remote machines run a tiny bootstrap script that downloads the current collector package, verifies it, and then scrapes.
 
 ## Important Rules
@@ -24,6 +24,7 @@ This replaces the old static report writer with a centralized Bun + SQLite servi
 ```bash
 bun install
 bun run setup:env --base-url http://localhost:3005
+bun run collector:release --update-base-url http://localhost:3005/collector/runtime
 bun src/server.tsx
 ```
 
@@ -73,6 +74,7 @@ Useful flags:
 
 ```bash
 bun run setup:env --base-url https://auc.ldev.cloud
+bun run setup:env --base-url https://auc.ldev.cloud --collector-update-base-url https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release
 bun run setup:env --base-url http://localhost:3005 --env-file .env.local --keys-dir .secrets
 bun run setup:env --force
 ```
@@ -84,7 +86,20 @@ The distributed scraper now lives in its own package under [collector](/Users/l/
 - It has its own `package.json`.
 - It has its own `tsconfig.json`.
 - It builds minified JavaScript into `collector/dist`.
+- It can publish signed runtime files into tracked `collector/release` for GitHub raw updates.
 - The root web app no longer typechecks or scripts collector source files as part of the app package.
+
+Publish the tracked release files with:
+
+```bash
+bun run collector:release
+```
+
+Production raw update base for this repo:
+
+```text
+https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release
+```
 
 ## Docker
 
@@ -113,6 +128,7 @@ On any machine that should scrape:
 
 ```bash
 export AUCTION_BASE_URL='https://auc.ldev.cloud'
+export AUCTION_COLLECTOR_UPDATE_BASE_URL='https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release'
 export AUCTION_INGEST_TOKEN='your-ingest-token'
 export AUCTION_COLLECTOR_PUBLIC_KEY_FILE='/path/to/collector-signing-key.pub.pem'
 cd collector
@@ -128,7 +144,7 @@ The bootstrap:
 - installs Playwright Chromium if needed
 - executes the current collector
 
-The collector itself checks the live manifest and exits if it is stale.
+The collector itself checks the configured collector update URL and exits if it is stale.
 
 ## GitHub Registry
 
@@ -142,54 +158,53 @@ It uses the built-in `GITHUB_TOKEN` with `packages: write`, so no extra registry
 
 ## Mac Mini Deployment
 
-The Mac mini should not build from source anymore. It should pull the published image from GHCR.
+The Mac mini deployment should run from this repo with Docker Compose. GHCR remains optional, but the repo checkout is the deployment source of truth.
 
 1. On your local machine, generate the runtime env and signing keys:
 
 ```bash
-bun run setup:env --base-url https://auc.ldev.cloud
+bun run setup:env \
+  --base-url https://auc.ldev.cloud \
+  --collector-update-base-url https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release
+bun run collector:release
 ```
 
-2. Copy only the runtime material to the Mac mini, for example:
+2. Copy the runtime material to the Mac mini:
    - `.env`
    - `runner-keys/collector-signing-key.pem`
    - `runner-keys/collector-signing-key.pub.pem`
-   - the generated `.env` already contains `AUCTION_ADMIN_EMAILS=luka@lnh.ge`
+   - `collector/release/*` must be committed and pushed so GitHub raw serves the same signed files
 
 3. On the Mac mini, create directories:
 
 ```bash
 mkdir -p /Users/l/_APPS/auction/data
 mkdir -p /Users/l/_APPS/auction/runner-keys
+mkdir -p /Users/l/_APPS/auction
 ```
 
-4. Copy the env file and keys there.
-
-5. Log in to GHCR once on the Mac mini:
+4. Clone the repo on the Mac mini:
 
 ```bash
-echo '<github_pat_or_fine_grained_token>' | docker login ghcr.io -u <github-username> --password-stdin
+git clone https://github.com/lukasa1993/Car-Auction-Homelab.git /Users/l/_APPS/auction/repo
 ```
 
-6. Pull and run the published image:
+5. Copy the env file and keys there:
 
 ```bash
-docker pull ghcr.io/<owner>/<repo>:latest
-
-docker rm -f auction 2>/dev/null || true
-
-docker run -d \
-  --name auction \
-  --restart unless-stopped \
-  -p 3005:3005 \
-  --env-file /Users/l/_APPS/auction/.env \
-  -v /Users/l/_APPS/auction/data:/app/data \
-  -v /Users/l/_APPS/auction/runner-keys:/app/runner-keys:ro \
-  --label com.centurylinklabs.watchtower.enable=true \
-  ghcr.io/<owner>/<repo>:latest
+cp .env /Users/l/_APPS/auction/.env
+cp runner-keys/collector-signing-key.pem /Users/l/_APPS/auction/runner-keys/
+cp runner-keys/collector-signing-key.pub.pem /Users/l/_APPS/auction/runner-keys/
 ```
 
-7. Change the `auc.ldev.cloud` Caddy block from static `root * /Users/l/_APPS/caddy/site/auc.ldev.cloud` to a reverse proxy to `127.0.0.1:3005`.
+6. Build and run the service from the repo checkout:
+
+```bash
+cd /Users/l/_APPS/auction/repo
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/mac-mini/compose.yml up -d --build
+```
+
+7. Change the live `auc.ldev.cloud` Caddy block from static `root * /Users/l/_APPS/caddy/site/auc.ldev.cloud` to a reverse proxy to `127.0.0.1:3005`.
 
 Suggested Caddy block:
 
@@ -206,10 +221,18 @@ handle @auction_report {
 }
 ```
 
+8. Reload Caddy and then remove the old static directory after validation:
+
+```bash
+sudo /opt/homebrew/opt/caddy/bin/caddy reload --config /opt/homebrew/etc/Caddyfile
+rm -rf /Users/l/_APPS/caddy/site/auc.ldev.cloud
+```
+
 ## Current Gaps
 
 - Copart and IAAI image extraction is best-effort and browser-backed.
 - Manual management for VIN targets exists in `/admin`, but it is still intentionally minimal.
 - There is no dedicated scheduler container yet; the expected production pattern is cron invoking the collector bootstrap on chosen machines.
 - If you need more than one admin later, extend `AUCTION_ADMIN_EMAILS` in `.env` as a comma-separated list.
-- Watchtower updates assume the Mac mini can authenticate to GHCR and track `ghcr.io/<owner>/<repo>:latest`.
+- `collector/release/*` must be regenerated and pushed whenever the collector runtime changes.
+- The app can still serve `/collector/runtime/*` for local development or fallback updates.

@@ -14,6 +14,7 @@ export interface ServerConfig {
   port: number;
   host: string;
   baseUrl: string;
+  collectorUpdateBaseUrl: string;
   adminPassword: string;
   ingestToken: string;
   collectorPrivateKeyPath: string;
@@ -39,6 +40,10 @@ export function loadServerConfig(): ServerConfig {
   const port = Number.parseInt(process.env.PORT || process.env.AUCTION_PORT || "3005", 10);
   const host = process.env.HOST || process.env.AUCTION_HOST || "0.0.0.0";
   const baseUrl = (process.env.AUCTION_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
+  const collectorUpdateBaseUrl = (
+    process.env.AUCTION_COLLECTOR_UPDATE_BASE_URL ||
+    `${baseUrl}/collector/runtime`
+  ).replace(/\/$/, "");
   const adminPassword = process.env.AUCTION_ADMIN_PASSWORD || "change-me";
   const ingestToken = process.env.AUCTION_INGEST_TOKEN || "change-me-ingest";
   const collectorPrivateKeyPath =
@@ -68,6 +73,7 @@ export function loadServerConfig(): ServerConfig {
     port,
     host,
     baseUrl,
+    collectorUpdateBaseUrl,
     adminPassword,
     ingestToken,
     collectorPrivateKeyPath,
