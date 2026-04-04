@@ -898,6 +898,30 @@ function absolutizeUrl(rawUrl: string, baseUrl: string): string | null {
   }
 }
 
+function compareVersionStrings(left: string, right: string): number {
+  const leftParts = String(left || "").split(".");
+  const rightParts = String(right || "").split(".");
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index] || "0";
+    const rightPart = rightParts[index] || "0";
+    const leftIsNumber = /^\d+$/.test(leftPart);
+    const rightIsNumber = /^\d+$/.test(rightPart);
+    if (leftIsNumber && rightIsNumber) {
+      const diff = Number(leftPart) - Number(rightPart);
+      if (diff !== 0) {
+        return diff < 0 ? -1 : 1;
+      }
+      continue;
+    }
+    const diff = leftPart.localeCompare(rightPart);
+    if (diff !== 0) {
+      return diff < 0 ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
 function extractImageCandidatesFromHtml(html: string, baseUrl: string): string[] {
   const results = new Set<string>();
   const patterns = [
@@ -1029,7 +1053,7 @@ async function uploadImages(baseUrl: string, token: string, runId: string, page:
 
 async function verifyRunnerFreshness(baseUrl: string): Promise<void> {
   const manifest = await fetchRemoteManifest(baseUrl);
-  if (Bun.semver.order(RUNNER_VERSION, manifest.minimumSupportedVersion) < 0 || RUNNER_VERSION !== manifest.version) {
+  if (compareVersionStrings(RUNNER_VERSION, manifest.minimumSupportedVersion) < 0 || RUNNER_VERSION !== manifest.version) {
     throw new Error(
       `Collector ${RUNNER_VERSION} is stale. Remote collector is ${manifest.version}. Re-run the bootstrap/update step before scraping.`,
     );

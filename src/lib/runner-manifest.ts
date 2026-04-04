@@ -28,20 +28,23 @@ export function buildRunnerManifest(options: {
   version: string;
   minimumSupportedVersion: string;
 }): RunnerManifest {
+  let generatedAtMs = 0;
   const files = walkFiles(options.runnerDir).map((relativePath) => {
     const absolutePath = path.join(options.runnerDir, relativePath);
+    const stats = statSync(absolutePath);
+    generatedAtMs = Math.max(generatedAtMs, stats.mtimeMs);
     const content = readFileSync(absolutePath);
     return {
       path: relativePath.replaceAll(path.sep, "/"),
       sha256: sha256Hex(content),
-      byteSize: statSync(absolutePath).size,
+      byteSize: stats.size,
     };
   });
 
   return {
     version: options.version,
     minimumSupportedVersion: options.minimumSupportedVersion,
-    generatedAt: new Date().toISOString(),
+    generatedAt: new Date(generatedAtMs || Date.now()).toISOString(),
     baseUrl: options.baseUrl.replace(/\/$/, ""),
     entrypoint: "auction-runner.js",
     packageJsonPath: "package.json",
