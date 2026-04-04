@@ -5,6 +5,7 @@ import type { LotListItem } from "../../lib/types";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/card";
+import { CopyTextButton } from "../components/copy-text-button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 
 function workflowVariant(state: string): "success" | "destructive" | "outline" {
@@ -24,6 +25,32 @@ function sortHistory(lots: LotListItem[]): LotListItem[] {
     const leftMs = Date.parse(left.removedAt || left.updatedAt);
     return rightMs - leftMs;
   });
+}
+
+function formatSourceLink(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname.replace(/^www\./, "")}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+function HistoryRowActions({ lot }: { lot: LotListItem }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-2">
+      <a href={lot.url} rel="noreferrer" target="_blank">
+        <Button size="sm" variant="outline">Open</Button>
+      </a>
+      <CopyTextButton value={lot.lotNumber} />
+      {lot.workflowState === "removed" ? (
+        <form action={`/admin/lots/${lot.id}/restore`} method="post">
+          <input name="redirect" type="hidden" value="/admin/history" />
+          <Button size="sm" type="submit" variant="outline">Restore</Button>
+        </form>
+      ) : null}
+    </div>
+  );
 }
 
 export function AdminHistoryPage({
@@ -79,10 +106,11 @@ export function AdminHistoryPage({
             <CardDescription>Public rejects land here immediately. Restore returns a row to the live feed.</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            <Table className="min-w-[880px]">
+            <Table className="min-w-[1040px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Listing</TableHead>
+                  <TableHead>Source link</TableHead>
                   <TableHead>Workflow</TableHead>
                   <TableHead>Removed at</TableHead>
                   <TableHead>Location</TableHead>
@@ -97,10 +125,22 @@ export function AdminHistoryPage({
                       <TableCell>
                         <div className="flex flex-col gap-1">
                           <a className="font-medium text-foreground" href={`/lots/${lot.sourceKey}/${lot.lotNumber}`}>
-                            {lot.carType} · {lot.lotNumber}
+                            {lot.carType}
                           </a>
+                          <div className="text-xs text-muted-foreground">Lot {lot.lotNumber}</div>
                           <div className="text-xs text-muted-foreground">{lot.sourceLabel}</div>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <a
+                          className="break-all text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          href={lot.url}
+                          rel="noreferrer"
+                          target="_blank"
+                          title={lot.url}
+                        >
+                          {formatSourceLink(lot.url)}
+                        </a>
                       </TableCell>
                       <TableCell>
                         <Badge variant={workflowVariant(lot.workflowState)}>{lot.workflowState}</Badge>
@@ -109,22 +149,13 @@ export function AdminHistoryPage({
                       <TableCell>{lot.location || "—"}</TableCell>
                       <TableCell>{lot.workflowNote || "—"}</TableCell>
                       <TableCell className="text-right">
-                        {lot.workflowState === "removed" ? (
-                          <form action={`/admin/lots/${lot.id}/restore`} method="post">
-                            <input name="redirect" type="hidden" value="/admin/history" />
-                            <Button size="sm" type="submit" variant="outline">Restore</Button>
-                          </form>
-                        ) : (
-                          <a href={`/lots/${lot.sourceKey}/${lot.lotNumber}`}>
-                            <Button size="sm" variant="outline">Open</Button>
-                          </a>
-                        )}
+                        <HistoryRowActions lot={lot} />
                       </TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell className="text-muted-foreground" colSpan={6}>
+                    <TableCell className="text-muted-foreground" colSpan={7}>
                       No moderated listings yet.
                     </TableCell>
                   </TableRow>

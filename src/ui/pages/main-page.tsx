@@ -3,6 +3,7 @@ import * as React from "react";
 import type { LotListItem } from "../../lib/types";
 import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
+import { CopyTextButton } from "../components/copy-text-button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/hover-card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 
@@ -39,10 +40,6 @@ function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
   }
   const diff = target - nowMs;
   return diff > 0 && diff <= 12 * 60 * 60 * 1000;
-}
-
-function renderLotLink(lot: LotListItem) {
-  return lot.sourceKey === "copart" ? lot.lotNumber : "open";
 }
 
 function formatAuctionCountdown(auctionDate: string | null | undefined, nowMs: number): string | null {
@@ -111,66 +108,6 @@ function formatGeneratedAt(generatedAt: string, nowMs: number): string {
   return `${Math.floor(minutes / 1440)}d ago`;
 }
 
-async function copyText(value: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
-}
-
-function CopyLotButton({ lotNumber }: { lotNumber: string }) {
-  const [label, setLabel] = React.useState("copy");
-  const resetTimer = React.useRef<number | null>(null);
-
-  React.useEffect(() => {
-    return () => {
-      if (resetTimer.current) {
-        window.clearTimeout(resetTimer.current);
-      }
-    };
-  }, []);
-
-  const handleCopy = async () => {
-    try {
-      await copyText(lotNumber);
-      setLabel("Copied");
-      if (resetTimer.current) {
-        window.clearTimeout(resetTimer.current);
-      }
-      resetTimer.current = window.setTimeout(() => {
-        setLabel("copy");
-      }, 1200);
-    } catch {
-      setLabel("Error");
-      if (resetTimer.current) {
-        window.clearTimeout(resetTimer.current);
-      }
-      resetTimer.current = window.setTimeout(() => {
-        setLabel("copy");
-      }, 1200);
-    }
-  };
-
-  return (
-    <button
-      className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      onClick={handleCopy}
-      type="button"
-    >
-      {label}
-    </button>
-  );
-}
-
 function ImageCell({ lot }: { lot: LotListItem }) {
   if (!lot.primaryImageId) {
     return (
@@ -226,12 +163,8 @@ function ImageCell({ lot }: { lot: LotListItem }) {
 function LotSourceCell({ lot }: { lot: LotListItem }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        <a href={lot.url} rel="noreferrer" target="_blank">{renderLotLink(lot)}</a>
-        {lot.sourceKey === "copart" ? (
-          <CopyLotButton lotNumber={lot.lotNumber} />
-        ) : null}
-      </div>
+      <div className="font-medium text-foreground">Lot {lot.lotNumber}</div>
+      <div className="text-[11px] text-muted-foreground">{lot.sourceLabel}</div>
       {lot.location ? <span className="text-[11px] text-muted-foreground">{lot.location}</span> : null}
     </div>
   );
@@ -258,6 +191,18 @@ function RejectListingButton({ lot, redirectTo }: { lot: LotListItem; redirectTo
       <input name="redirect" type="hidden" value={redirectTo} />
       <Button size="sm" type="submit" variant="outline">Reject</Button>
     </form>
+  );
+}
+
+function LotRowActions({ lot, redirectTo }: { lot: LotListItem; redirectTo: string }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-2">
+      <a href={lot.url} rel="noreferrer" target="_blank">
+        <Button size="sm" variant="outline">Open</Button>
+      </a>
+      <CopyTextButton value={lot.lotNumber} />
+      <RejectListingButton lot={lot} redirectTo={redirectTo} />
+    </div>
   );
 }
 
@@ -317,7 +262,7 @@ export function MainPage({
                       <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                       <TableCell><LotSourceCell lot={lot} /></TableCell>
                       <TableCell className="text-right">
-                        <RejectListingButton lot={lot} redirectTo={redirectTo} />
+                        <LotRowActions lot={lot} redirectTo={redirectTo} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -366,7 +311,7 @@ export function MainPage({
                     <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                     <TableCell><LotSourceCell lot={lot} /></TableCell>
                     <TableCell className="text-right">
-                      <RejectListingButton lot={lot} redirectTo={redirectTo} />
+                      <LotRowActions lot={lot} redirectTo={redirectTo} />
                     </TableCell>
                   </TableRow>
                 ))}
