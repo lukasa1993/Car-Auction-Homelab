@@ -1,0 +1,12 @@
+node_modules/
+collector/node_modules/
+collector/dist/
+dist/
+data/
+public/app.css
+.env
+runner-keys/
+.playwright/
+__pycache__/
+*.pyc
+.DS_Store

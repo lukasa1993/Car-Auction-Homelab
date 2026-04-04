@@ -1,0 +1,821 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { Database } from "bun:sqlite";
+
+import { DEFAULT_TARGETS } from "../lib/default-targets";
+import type {
+  IngestPayload,
+  LotActionRow,
+  LotDetail,
+  LotImageRow,
+  LotListItem,
+  LotRow,
+  LotSnapshotRow,
+  RunnerScope,
+  ScrapedLotRecord,
+  SourceKey,
+  VinTarget,
+  WorkflowState,
+} from "../lib/types";
+import { extFromMimeType, normalizeWhitespace, sha256Hex } from "../lib/utils";
+import { createSqliteDatabase } from "./sqlite";
+
+export interface StoreOptions {
+  databasePath: string;
+  mediaDir: string;
+}
+
+interface RunnerSummary {
+  runId: string;
+  upserted: number;
+  missingMarked: number;
+}
+
+function boolFlag(value: boolean): number {
+  return value ? 1 : 0;
+}
+
+function rowBool(value: unknown): boolean {
+  return Number(value ?? 0) === 1;
+}
+
+function normalizeSourceLabel(sourceKey: SourceKey): string {
+  return sourceKey === "iaai" ? "IAAI" : "Copart";
+}
+
+function normalizeLotStatus(status: string | null | undefined): LotRow["status"] {
+  switch ((status ?? "").toLowerCase()) {
+    case "upcoming":
+      return "upcoming";
+    case "done":
+      return "done";
+    case "missing":
+      return "missing";
+    case "canceled":
+      return "canceled";
+    default:
+      return "unknown";
+  }
+}
+
+function normalizeWorkflowState(status: string | null | undefined): WorkflowState {
+  switch ((status ?? "").toLowerCase()) {
+    case "approved":
+      return "approved";
+    case "removed":
+      return "removed";
+    default:
+      return "new";
+  }
+}
+
+function mapVinTarget(row: Record<string, unknown>): VinTarget {
+  return {
+    id: String(row.id),
+    key: String(row.key),
+    label: String(row.label),
+    carType: String(row.car_type),
+    marker: String(row.marker),
+    vinPattern: String(row.vin_pattern),
+    vinPrefix: String(row.vin_prefix),
+    yearFrom: Number(row.year_from),
+    yearTo: Number(row.year_to),
+    copartSlug: String(row.copart_slug ?? ""),
+    iaaiPath: String(row.iaai_path ?? ""),
+    enabledCopart: rowBool(row.enabled_copart),
+    enabledIaai: rowBool(row.enabled_iaai),
+    active: rowBool(row.active),
+    sortOrder: Number(row.sort_order ?? 0),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapLotRow(row: Record<string, unknown>): LotRow {
+  return {
+    id: String(row.id),
+    sourceKey: String(row.source_key) as SourceKey,
+    sourceLabel: String(row.source_label),
+    targetKey: row.target_key ? String(row.target_key) : null,
+    lotNumber: String(row.lot_number),
+    sourceDetailId: row.source_detail_id ? String(row.source_detail_id) : null,
+    carType: String(row.car_type),
+    marker: String(row.marker),
+    vinPattern: row.vin_pattern ? String(row.vin_pattern) : null,
+    vin: row.vin ? String(row.vin) : null,
+    modelYear: row.model_year == null ? null : Number(row.model_year),
+    yearPage: row.year_page == null ? null : Number(row.year_page),
+    status: normalizeLotStatus(String(row.status ?? "")),
+    workflowState: normalizeWorkflowState(String(row.workflow_state ?? "")),
+    workflowNote: row.workflow_note ? String(row.workflow_note) : null,
+    auctionDate: row.auction_date ? String(row.auction_date) : null,
+    auctionDateRaw: row.auction_date_raw ? String(row.auction_date_raw) : null,
+    location: row.location ? String(row.location) : null,
+    url: String(row.url),
+    evidence: row.evidence ? String(row.evidence) : null,
+    firstSeenAt: String(row.first_seen_at),
+    lastSeenAt: String(row.last_seen_at),
+    lastIngestedAt: String(row.last_ingested_at),
+    lastSyncRunId: row.last_sync_run_id ? String(row.last_sync_run_id) : null,
+    missingSince: row.missing_since ? String(row.missing_since) : null,
+    missingCount: Number(row.missing_count ?? 0),
+    canceledAt: row.canceled_at ? String(row.canceled_at) : null,
+    approvedAt: row.approved_at ? String(row.approved_at) : null,
+    removedAt: row.removed_at ? String(row.removed_at) : null,
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapLotImage(row: Record<string, unknown>): LotImageRow {
+  return {
+    id: String(row.id),
+    lotId: String(row.lot_id),
+    sourceUrl: String(row.source_url),
+    storagePath: String(row.storage_path),
+    mimeType: row.mime_type ? String(row.mime_type) : null,
+    sha256: String(row.sha256),
+    byteSize: Number(row.byte_size),
+    width: row.width == null ? null : Number(row.width),
+    height: row.height == null ? null : Number(row.height),
+    sortOrder: Number(row.sort_order ?? 0),
+    createdAt: String(row.created_at),
+    lastSeenAt: String(row.last_seen_at),
+    lastSyncRunId: row.last_sync_run_id ? String(row.last_sync_run_id) : null,
+    active: rowBool(row.active),
+  };
+}
+
+function mapLotSnapshot(row: Record<string, unknown>): LotSnapshotRow {
+  return {
+    id: String(row.id),
+    lotId: String(row.lot_id),
+    syncRunId: row.sync_run_id ? String(row.sync_run_id) : null,
+    observedAt: String(row.observed_at),
+    isPresent: rowBool(row.is_present),
+    snapshotJson: String(row.snapshot_json),
+  };
+}
+
+function mapLotAction(row: Record<string, unknown>): LotActionRow {
+  return {
+    id: String(row.id),
+    lotId: String(row.lot_id),
+    action: String(row.action),
+    actor: String(row.actor),
+    note: row.note ? String(row.note) : null,
+    metadataJson: row.metadata_json ? String(row.metadata_json) : null,
+    createdAt: String(row.created_at),
+  };
+}
+
+function lotListSortValue(row: LotRow): number {
+  if (row.status === "done") {
+    return 9_999_999_999_999;
+  }
+  if (!row.auctionDate) {
+    return 9_999_999_999_998;
+  }
+  const milliseconds = Date.parse(row.auctionDate);
+  return Number.isNaN(milliseconds) ? 9_999_999_999_997 : milliseconds;
+}
+
+export class AuctionStore {
+  readonly db: Database;
+  readonly mediaDir: string;
+
+  constructor(options: StoreOptions) {
+    mkdirSync(path.dirname(options.databasePath), { recursive: true });
+    mkdirSync(options.mediaDir, { recursive: true });
+    this.mediaDir = options.mediaDir;
+    this.db = createSqliteDatabase(options.databasePath, { strict: true });
+    this.initSchema();
+    this.seedDefaultTargets();
+  }
+
+  private initSchema(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS vin_targets (
+        id TEXT PRIMARY KEY,
+        key TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        car_type TEXT NOT NULL,
+        marker TEXT NOT NULL,
+        vin_pattern TEXT NOT NULL,
+        vin_prefix TEXT NOT NULL,
+        year_from INTEGER NOT NULL,
+        year_to INTEGER NOT NULL,
+        copart_slug TEXT NOT NULL,
+        iaai_path TEXT NOT NULL,
+        enabled_copart INTEGER NOT NULL DEFAULT 1,
+        enabled_iaai INTEGER NOT NULL DEFAULT 1,
+        active INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sync_runs (
+        id TEXT PRIMARY KEY,
+        runner_id TEXT,
+        runner_version TEXT,
+        machine_name TEXT,
+        submitted_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        status TEXT NOT NULL,
+        source_keys_json TEXT NOT NULL,
+        covered_scopes_json TEXT NOT NULL,
+        records_received INTEGER NOT NULL DEFAULT 0,
+        records_upserted INTEGER NOT NULL DEFAULT 0,
+        records_missing_marked INTEGER NOT NULL DEFAULT 0,
+        error_text TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS lots (
+        id TEXT PRIMARY KEY,
+        source_key TEXT NOT NULL,
+        source_label TEXT NOT NULL,
+        target_key TEXT,
+        lot_number TEXT NOT NULL,
+        source_detail_id TEXT,
+        car_type TEXT NOT NULL,
+        marker TEXT NOT NULL,
+        vin_pattern TEXT,
+        vin TEXT,
+        model_year INTEGER,
+        year_page INTEGER,
+        status TEXT NOT NULL,
+        workflow_state TEXT NOT NULL DEFAULT 'new',
+        workflow_note TEXT,
+        auction_date TEXT,
+        auction_date_raw TEXT,
+        location TEXT,
+        url TEXT NOT NULL,
+        evidence TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        last_ingested_at TEXT NOT NULL,
+        last_sync_run_id TEXT,
+        missing_since TEXT,
+        missing_count INTEGER NOT NULL DEFAULT 0,
+        canceled_at TEXT,
+        approved_at TEXT,
+        removed_at TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(source_key, lot_number)
+      );
+
+      CREATE TABLE IF NOT EXISTS lot_snapshots (
+        id TEXT PRIMARY KEY,
+        lot_id TEXT NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+        sync_run_id TEXT REFERENCES sync_runs(id) ON DELETE SET NULL,
+        observed_at TEXT NOT NULL,
+        is_present INTEGER NOT NULL DEFAULT 1,
+        snapshot_json TEXT NOT NULL,
+        UNIQUE(lot_id, sync_run_id, is_present)
+      );
+
+      CREATE TABLE IF NOT EXISTS lot_actions (
+        id TEXT PRIMARY KEY,
+        lot_id TEXT NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        note TEXT,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS lot_images (
+        id TEXT PRIMARY KEY,
+        lot_id TEXT NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+        source_url TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        mime_type TEXT,
+        sha256 TEXT NOT NULL,
+        byte_size INTEGER NOT NULL,
+        width INTEGER,
+        height INTEGER,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        last_sync_run_id TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(lot_id, sha256)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_lots_source_target ON lots(source_key, target_key);
+      CREATE INDEX IF NOT EXISTS idx_lots_workflow ON lots(workflow_state);
+      CREATE INDEX IF NOT EXISTS idx_lot_images_lot_id ON lot_images(lot_id);
+      CREATE INDEX IF NOT EXISTS idx_snapshots_lot_id ON lot_snapshots(lot_id);
+      CREATE INDEX IF NOT EXISTS idx_actions_lot_id ON lot_actions(lot_id);
+    `);
+  }
+
+  private seedDefaultTargets(): void {
+    const countRow = this.db.query("SELECT COUNT(*) AS count FROM vin_targets").get() as { count: number };
+    if (Number(countRow?.count ?? 0) > 0) {
+      return;
+    }
+
+    const insert = this.db.query(`
+      INSERT INTO vin_targets (
+        id, key, label, car_type, marker, vin_pattern, vin_prefix,
+        year_from, year_to, copart_slug, iaai_path,
+        enabled_copart, enabled_iaai, active, sort_order,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const now = new Date().toISOString();
+    for (const target of DEFAULT_TARGETS) {
+      insert.run(
+        randomUUID(),
+        target.key,
+        target.label,
+        target.carType,
+        target.marker,
+        target.vinPattern,
+        target.vinPrefix,
+        target.yearFrom,
+        target.yearTo,
+        target.copartSlug,
+        target.iaaiPath,
+        boolFlag(target.enabledCopart),
+        boolFlag(target.enabledIaai),
+        boolFlag(target.active),
+        target.sortOrder,
+        now,
+        now,
+      );
+    }
+  }
+
+  getVinTargets(activeOnly = false): VinTarget[] {
+    const sql = activeOnly
+      ? "SELECT * FROM vin_targets WHERE active = 1 ORDER BY sort_order, key"
+      : "SELECT * FROM vin_targets ORDER BY sort_order, key";
+    return (this.db.query(sql).all() as Record<string, unknown>[]).map(mapVinTarget);
+  }
+
+  getScrapeConfig(): { configVersion: string; targets: VinTarget[] } {
+    const row = this.db.query("SELECT MAX(updated_at) AS updated_at FROM vin_targets WHERE active = 1").get() as {
+      updated_at?: string | null;
+    };
+    return {
+      configVersion: String(row?.updated_at ?? new Date().toISOString()),
+      targets: this.getVinTargets(true),
+    };
+  }
+
+  upsertVinTarget(input: Partial<VinTarget> & { key: string; label: string; carType: string; vinPattern: string }): string {
+    const existing = this.db
+      .query("SELECT * FROM vin_targets WHERE id = ? OR key = ? LIMIT 1")
+      .get(input.id ?? "", input.key) as Record<string, unknown> | null;
+    const now = new Date().toISOString();
+    const next = {
+      id: input.id ?? (existing ? String(existing.id) : randomUUID()),
+      key: input.key,
+      label: input.label,
+      carType: input.carType,
+      marker: input.marker ?? `${input.label} · ${input.vinPattern}`,
+      vinPattern: input.vinPattern.toUpperCase(),
+      vinPrefix: (input.vinPattern.toUpperCase().split("?")[0] ?? input.vinPattern.toUpperCase()),
+      yearFrom: input.yearFrom ?? Number(existing?.year_from ?? 2024),
+      yearTo: input.yearTo ?? Number(existing?.year_to ?? 2027),
+      copartSlug: input.copartSlug ?? String(existing?.copart_slug ?? ""),
+      iaaiPath: input.iaaiPath ?? String(existing?.iaai_path ?? ""),
+      enabledCopart: input.enabledCopart ?? rowBool(existing?.enabled_copart ?? 1),
+      enabledIaai: input.enabledIaai ?? rowBool(existing?.enabled_iaai ?? 1),
+      active: input.active ?? rowBool(existing?.active ?? 1),
+      sortOrder: input.sortOrder ?? Number(existing?.sort_order ?? 0),
+      createdAt: existing ? String(existing.created_at) : now,
+      updatedAt: now,
+    };
+
+    this.db.query(`
+      INSERT INTO vin_targets (
+        id, key, label, car_type, marker, vin_pattern, vin_prefix,
+        year_from, year_to, copart_slug, iaai_path,
+        enabled_copart, enabled_iaai, active, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        key = excluded.key,
+        label = excluded.label,
+        car_type = excluded.car_type,
+        marker = excluded.marker,
+        vin_pattern = excluded.vin_pattern,
+        vin_prefix = excluded.vin_prefix,
+        year_from = excluded.year_from,
+        year_to = excluded.year_to,
+        copart_slug = excluded.copart_slug,
+        iaai_path = excluded.iaai_path,
+        enabled_copart = excluded.enabled_copart,
+        enabled_iaai = excluded.enabled_iaai,
+        active = excluded.active,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at
+    `).run(
+      next.id,
+      next.key,
+      next.label,
+      next.carType,
+      next.marker,
+      next.vinPattern,
+      next.vinPrefix,
+      next.yearFrom,
+      next.yearTo,
+      next.copartSlug,
+      next.iaaiPath,
+      boolFlag(next.enabledCopart),
+      boolFlag(next.enabledIaai),
+      boolFlag(next.active),
+      next.sortOrder,
+      next.createdAt,
+      next.updatedAt,
+    );
+    return next.id;
+  }
+
+  getLotList(includeRemoved = false): LotListItem[] {
+    const rows = this.db.query(`
+      SELECT
+        l.*,
+        (
+          SELECT li.id
+          FROM lot_images li
+          WHERE li.lot_id = l.id AND li.active = 1
+          ORDER BY li.sort_order, li.created_at
+          LIMIT 1
+        ) AS primary_image_id,
+        (
+          SELECT COUNT(*)
+          FROM lot_images li
+          WHERE li.lot_id = l.id AND li.active = 1
+        ) AS image_count
+      FROM lots l
+      WHERE (? = 1 OR l.workflow_state != 'removed')
+      ORDER BY l.updated_at DESC
+    `).all(boolFlag(includeRemoved)) as Record<string, unknown>[];
+
+    return rows
+      .map((row) => ({
+        ...mapLotRow(row),
+        primaryImageId: row.primary_image_id ? String(row.primary_image_id) : null,
+        imageCount: Number(row.image_count ?? 0),
+      }))
+      .sort((left, right) => {
+        return (
+          lotListSortValue(left) - lotListSortValue(right) ||
+          left.carType.localeCompare(right.carType) ||
+          left.marker.localeCompare(right.marker) ||
+          left.sourceLabel.localeCompare(right.sourceLabel) ||
+          left.lotNumber.localeCompare(right.lotNumber)
+        );
+      });
+  }
+
+  getLotDetail(sourceKey: SourceKey, lotNumber: string): LotDetail | null {
+    const lotRow = this.db
+      .query("SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1")
+      .get(sourceKey, lotNumber) as Record<string, unknown> | null;
+    if (!lotRow) {
+      return null;
+    }
+    const lot = mapLotRow(lotRow);
+    const images = (this.db
+      .query("SELECT * FROM lot_images WHERE lot_id = ? AND active = 1 ORDER BY sort_order, created_at")
+      .all(lot.id) as Record<string, unknown>[])
+      .map(mapLotImage);
+    const snapshots = (this.db
+      .query("SELECT * FROM lot_snapshots WHERE lot_id = ? ORDER BY observed_at DESC")
+      .all(lot.id) as Record<string, unknown>[])
+      .map(mapLotSnapshot);
+    const actions = (this.db
+      .query("SELECT * FROM lot_actions WHERE lot_id = ? ORDER BY created_at DESC")
+      .all(lot.id) as Record<string, unknown>[])
+      .map(mapLotAction);
+    return { lot, images, snapshots, actions };
+  }
+
+  getImageRow(imageId: string): LotImageRow | null {
+    const row = this.db.query("SELECT * FROM lot_images WHERE id = ? LIMIT 1").get(imageId) as Record<string, unknown> | null;
+    return row ? mapLotImage(row) : null;
+  }
+
+  setWorkflowState(lotId: string, workflowState: WorkflowState, actor: string, note: string | null): void {
+    const now = new Date().toISOString();
+    const lotRow = this.db.query("SELECT * FROM lots WHERE id = ? LIMIT 1").get(lotId) as Record<string, unknown> | null;
+    if (!lotRow) {
+      throw new Error(`Unknown lot ${lotId}`);
+    }
+
+    const approvedAt =
+      workflowState === "approved"
+        ? now
+        : workflowState === "removed"
+          ? (lotRow.approved_at ? String(lotRow.approved_at) : null)
+          : null;
+    const removedAt = workflowState === "removed" ? now : null;
+    this.db.query(`
+      UPDATE lots
+      SET workflow_state = ?, workflow_note = ?, approved_at = ?, removed_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(workflowState, note, approvedAt, removedAt, now, lotId);
+
+    this.db.query(`
+      INSERT INTO lot_actions (id, lot_id, action, actor, note, metadata_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(randomUUID(), lotId, workflowState, actor, note, null, now);
+  }
+
+  ingest(payload: IngestPayload): RunnerSummary {
+    const runId = payload.run.id ?? randomUUID();
+    const submittedAt = new Date().toISOString();
+    const completedAt = payload.run.completedAt || submittedAt;
+    const presentKeysByScope = new Map<string, Set<string>>();
+    let upserted = 0;
+    let missingMarked = 0;
+
+    this.db.query(`
+      INSERT INTO sync_runs (
+        id, runner_id, runner_version, machine_name, submitted_at, started_at, completed_at,
+        status, source_keys_json, covered_scopes_json, records_received
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      runId,
+      payload.run.runnerId,
+      payload.run.runnerVersion,
+      payload.run.machineName,
+      submittedAt,
+      payload.run.startedAt,
+      completedAt,
+      "running",
+      JSON.stringify(payload.run.sourceKeys),
+      JSON.stringify(payload.run.scopes),
+      payload.records.length,
+    );
+
+    const transaction = this.db.transaction(() => {
+      for (const record of payload.records) {
+        const scopeKey = `${record.sourceKey}:${record.targetKey}`;
+        if (!presentKeysByScope.has(scopeKey)) {
+          presentKeysByScope.set(scopeKey, new Set());
+        }
+        presentKeysByScope.get(scopeKey)?.add(record.lotNumber);
+        this.upsertLotRecord(runId, completedAt, record);
+        upserted += 1;
+      }
+
+      for (const scope of payload.run.scopes.filter((item) => item.status === "complete")) {
+        missingMarked += this.reconcileMissingLots(runId, completedAt, scope, presentKeysByScope.get(`${scope.sourceKey}:${scope.targetKey}`) ?? new Set());
+      }
+
+      this.db.query(`
+        UPDATE sync_runs
+        SET status = ?, records_upserted = ?, records_missing_marked = ?, completed_at = ?
+        WHERE id = ?
+      `).run("complete", upserted, missingMarked, completedAt, runId);
+    });
+
+    transaction();
+    return { runId, upserted, missingMarked };
+  }
+
+  uploadLotImage(input: {
+    runId: string;
+    sourceKey: SourceKey;
+    lotNumber: string;
+    sourceUrl: string;
+    sortOrder: number;
+    mimeType?: string | null;
+    width?: number | null;
+    height?: number | null;
+    dataBase64: string;
+  }): LotImageRow {
+    const lotRow = this.db
+      .query("SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1")
+      .get(input.sourceKey, input.lotNumber) as Record<string, unknown> | null;
+    if (!lotRow) {
+      throw new Error(`Unknown lot ${input.sourceKey}:${input.lotNumber}`);
+    }
+    const lot = mapLotRow(lotRow);
+    const bytes = Buffer.from(input.dataBase64, "base64");
+    const sha256 = sha256Hex(bytes);
+    const mimeType = input.mimeType || "application/octet-stream";
+    const extension = extFromMimeType(mimeType);
+    const relativeDir = path.join(input.sourceKey, input.lotNumber);
+    const absoluteDir = path.join(this.mediaDir, relativeDir);
+    mkdirSync(absoluteDir, { recursive: true });
+    const relativePath = path.join(relativeDir, `${sha256}.${extension}`);
+    const absolutePath = path.join(this.mediaDir, relativePath);
+    if (!existsSync(absolutePath)) {
+      writeFileSync(absolutePath, bytes);
+    }
+    const now = new Date().toISOString();
+
+    const existing = this.db.query("SELECT * FROM lot_images WHERE lot_id = ? AND sha256 = ? LIMIT 1").get(lot.id, sha256) as
+      | Record<string, unknown>
+      | null;
+
+    if (existing) {
+      this.db.query(`
+        UPDATE lot_images
+        SET source_url = ?, storage_path = ?, mime_type = ?, byte_size = ?, width = ?, height = ?, sort_order = ?, last_seen_at = ?, last_sync_run_id = ?, active = 1
+        WHERE id = ?
+      `).run(
+        input.sourceUrl,
+        relativePath,
+        mimeType,
+        bytes.length,
+        input.width ?? null,
+        input.height ?? null,
+        input.sortOrder,
+        now,
+        input.runId,
+        String(existing.id),
+      );
+      return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(String(existing.id)) as Record<string, unknown>);
+    }
+
+    const id = randomUUID();
+    this.db.query(`
+      INSERT INTO lot_images (
+        id, lot_id, source_url, storage_path, mime_type, sha256, byte_size,
+        width, height, sort_order, created_at, last_seen_at, last_sync_run_id, active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `).run(
+      id,
+      lot.id,
+      input.sourceUrl,
+      relativePath,
+      mimeType,
+      sha256,
+      bytes.length,
+      input.width ?? null,
+      input.height ?? null,
+      input.sortOrder,
+      now,
+      now,
+      input.runId,
+    );
+    return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(id) as Record<string, unknown>);
+  }
+
+  private upsertLotRecord(runId: string, observedAt: string, record: ScrapedLotRecord): void {
+    const existing = this.db
+      .query("SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1")
+      .get(record.sourceKey, record.lotNumber) as Record<string, unknown> | null;
+
+    const nextStatus = normalizeLotStatus(record.status);
+    if (existing) {
+      this.db.query(`
+        UPDATE lots
+        SET
+          source_label = ?,
+          target_key = ?,
+          source_detail_id = ?,
+          car_type = ?,
+          marker = ?,
+          vin_pattern = ?,
+          vin = ?,
+          model_year = ?,
+          year_page = ?,
+          status = ?,
+          auction_date = ?,
+          auction_date_raw = ?,
+          location = ?,
+          url = ?,
+          evidence = ?,
+          last_seen_at = ?,
+          last_ingested_at = ?,
+          last_sync_run_id = ?,
+          missing_since = NULL,
+          missing_count = 0,
+          canceled_at = CASE WHEN ? IN ('upcoming', 'done', 'unknown') THEN NULL ELSE canceled_at END,
+          updated_at = ?
+        WHERE id = ?
+      `).run(
+        record.sourceLabel || normalizeSourceLabel(record.sourceKey),
+        record.targetKey || null,
+        record.sourceDetailId ?? null,
+        record.carType,
+        record.marker,
+        record.vinPattern || null,
+        record.vin || null,
+        record.modelYear ?? null,
+        record.yearPage ?? null,
+        nextStatus,
+        record.auctionDate || null,
+        record.auctionDateRaw || null,
+        record.location || null,
+        record.url,
+        record.evidence || null,
+        observedAt,
+        observedAt,
+        runId,
+        nextStatus,
+        observedAt,
+        String(existing.id),
+      );
+      this.insertSnapshot(String(existing.id), runId, observedAt, true, record);
+      return;
+    }
+
+    const id = randomUUID();
+    this.db.query(`
+      INSERT INTO lots (
+        id, source_key, source_label, target_key, lot_number, source_detail_id,
+        car_type, marker, vin_pattern, vin, model_year, year_page, status,
+        workflow_state, workflow_note, auction_date, auction_date_raw, location,
+        url, evidence, first_seen_at, last_seen_at, last_ingested_at, last_sync_run_id,
+        missing_since, missing_count, canceled_at, approved_at, removed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, NULL, ?)
+    `).run(
+      id,
+      record.sourceKey,
+      record.sourceLabel || normalizeSourceLabel(record.sourceKey),
+      record.targetKey || null,
+      record.lotNumber,
+      record.sourceDetailId ?? null,
+      record.carType,
+      record.marker,
+      record.vinPattern || null,
+      record.vin || null,
+      record.modelYear ?? null,
+      record.yearPage ?? null,
+      nextStatus,
+      record.auctionDate || null,
+      record.auctionDateRaw || null,
+      record.location || null,
+      record.url,
+      record.evidence || null,
+      observedAt,
+      observedAt,
+      observedAt,
+      runId,
+      observedAt,
+    );
+    this.insertSnapshot(id, runId, observedAt, true, record);
+  }
+
+  private insertSnapshot(lotId: string, runId: string, observedAt: string, isPresent: boolean, record: ScrapedLotRecord | null): void {
+    this.db.query(`
+      INSERT OR REPLACE INTO lot_snapshots (id, lot_id, sync_run_id, observed_at, is_present, snapshot_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      `${lotId}:${runId}:${isPresent ? "present" : "missing"}`,
+      lotId,
+      runId,
+      observedAt,
+      boolFlag(isPresent),
+      JSON.stringify(record ?? null),
+    );
+  }
+
+  private reconcileMissingLots(runId: string, observedAt: string, scope: RunnerScope, presentLotNumbers: Set<string>): number {
+    const existingRows = this.db
+      .query("SELECT * FROM lots WHERE source_key = ? AND target_key = ?")
+      .all(scope.sourceKey, scope.targetKey) as Record<string, unknown>[];
+    let missingMarked = 0;
+
+    for (const row of existingRows) {
+      const lot = mapLotRow(row);
+      if (presentLotNumbers.has(lot.lotNumber)) {
+        continue;
+      }
+      const nextMissingCount = lot.missingCount + 1;
+      const nextStatus =
+        lot.status === "done"
+          ? "done"
+          : nextMissingCount >= 2
+            ? "canceled"
+            : "missing";
+      this.db.query(`
+        UPDATE lots
+        SET
+          status = ?,
+          missing_since = COALESCE(missing_since, ?),
+          missing_count = ?,
+          canceled_at = CASE WHEN ? = 'canceled' THEN COALESCE(canceled_at, ?) ELSE canceled_at END,
+          last_ingested_at = ?,
+          last_sync_run_id = ?,
+          updated_at = ?
+        WHERE id = ?
+      `).run(
+        nextStatus,
+        observedAt,
+        nextMissingCount,
+        nextStatus,
+        observedAt,
+        observedAt,
+        runId,
+        observedAt,
+        lot.id,
+      );
+      this.insertSnapshot(lot.id, runId, observedAt, false, null);
+      missingMarked += 1;
+    }
+    return missingMarked;
+  }
+}

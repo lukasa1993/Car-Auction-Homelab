@@ -1,0 +1,10 @@
+node_modules
+collector/node_modules
+collector/dist
+dist
+.playwright
+.tmp
+data
+public/app.css
+runner-keys
+.DS_Store
