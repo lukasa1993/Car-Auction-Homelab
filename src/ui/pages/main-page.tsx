@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import type { LotListItem } from "../../lib/types";
+import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 
@@ -101,6 +102,15 @@ function TabLink({ href, active, children }: { href: string; active: boolean; ch
   );
 }
 
+function RejectListingButton({ lot, redirectTo }: { lot: LotListItem; redirectTo: string }) {
+  return (
+    <form action={`/lots/${lot.id}/reject`} method="post">
+      <input name="redirect" type="hidden" value={redirectTo} />
+      <Button size="sm" type="submit" variant="outline">Reject</Button>
+    </form>
+  );
+}
+
 export function MainPage({
   lots,
   allLots,
@@ -115,6 +125,7 @@ export function MainPage({
   const nowMs = Date.now();
   const soonLots = allLots.filter((lot) => isStartingSoon(lot, nowMs));
   const remainingLots = lots.filter((lot) => !isStartingSoon(lot, nowMs));
+  const redirectTo = `/?tab=${activeTab}`;
 
   return (
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
@@ -137,6 +148,7 @@ export function MainPage({
                     <TableHead>Image</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Source</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -149,6 +161,9 @@ export function MainPage({
                       <TableCell><ImageCell lot={lot} /></TableCell>
                       <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                       <TableCell><LotSourceCell lot={lot} /></TableCell>
+                      <TableCell className="text-right">
+                        <RejectListingButton lot={lot} redirectTo={redirectTo} />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -175,6 +190,7 @@ export function MainPage({
                   <TableHead className="hidden sm:table-cell">Auction Date</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Source</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -194,6 +210,9 @@ export function MainPage({
                     </TableCell>
                     <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                     <TableCell><LotSourceCell lot={lot} /></TableCell>
+                    <TableCell className="text-right">
+                      <RejectListingButton lot={lot} redirectTo={redirectTo} />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

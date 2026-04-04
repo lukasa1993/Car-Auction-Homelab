@@ -2,7 +2,6 @@ name: auction
 
 services:
   auction:
-    container_name: auction
     image: ${AUCTION_IMAGE:-ghcr.io/lukasa1993/car-auction-homelab:latest}
     pull_policy: always
     restart: unless-stopped
