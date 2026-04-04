@@ -655,6 +655,11 @@ export class AuctionStore {
         input.runId,
         String(existing.id),
       );
+      this.db.query(`
+        UPDATE lot_images
+        SET active = 0
+        WHERE lot_id = ? AND sort_order = ? AND id != ?
+      `).run(lot.id, input.sortOrder, String(existing.id));
       return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(String(existing.id)) as Record<string, unknown>);
     }
 
@@ -679,6 +684,11 @@ export class AuctionStore {
       now,
       input.runId,
     );
+    this.db.query(`
+      UPDATE lot_images
+      SET active = 0
+      WHERE lot_id = ? AND sort_order = ? AND id != ?
+    `).run(lot.id, input.sortOrder, id);
     return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(id) as Record<string, unknown>);
   }
 

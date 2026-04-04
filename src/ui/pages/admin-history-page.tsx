@@ -6,6 +6,7 @@ import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/card";
 import { CopyTextButton } from "../components/copy-text-button";
+import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 
 function workflowVariant(state: string): "success" | "destructive" | "outline" {
@@ -50,6 +51,17 @@ function HistoryRowActions({ lot }: { lot: LotListItem }) {
         </form>
       ) : null}
     </div>
+  );
+}
+
+function HistoryImageCell({ lot }: { lot: LotListItem }) {
+  return (
+    <LotImagePreview
+      hoverSide="left"
+      lot={lot}
+      placeholderClassName="h-14 w-20 rounded-2xl"
+      thumbClassName="h-14 w-20 rounded-2xl"
+    />
   );
 }
 
@@ -106,9 +118,10 @@ export function AdminHistoryPage({
             <CardDescription>Public rejects land here immediately. Restore returns a row to the live feed.</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            <Table className="min-w-[1040px]">
+            <Table className="min-w-[1140px]">
               <TableHeader>
                 <TableRow>
+                  <TableHead>Image</TableHead>
                   <TableHead>Listing</TableHead>
                   <TableHead>Source link</TableHead>
                   <TableHead>Workflow</TableHead>
@@ -122,6 +135,7 @@ export function AdminHistoryPage({
                 {visibleLots.length ? (
                   visibleLots.map((lot) => (
                     <TableRow key={lot.id}>
+                      <TableCell><HistoryImageCell lot={lot} /></TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-1">
                           <a className="font-medium text-foreground" href={`/lots/${lot.sourceKey}/${lot.lotNumber}`}>
@@ -155,7 +169,7 @@ export function AdminHistoryPage({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell className="text-muted-foreground" colSpan={7}>
+                    <TableCell className="text-muted-foreground" colSpan={8}>
                       No moderated listings yet.
                     </TableCell>
                   </TableRow>

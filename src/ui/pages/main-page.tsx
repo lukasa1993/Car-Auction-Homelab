@@ -4,7 +4,7 @@ import type { LotListItem } from "../../lib/types";
 import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
 import { CopyTextButton } from "../components/copy-text-button";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/hover-card";
+import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 
 type Tab = "model3" | "modely" | "all";
@@ -109,55 +109,7 @@ function formatGeneratedAt(generatedAt: string, nowMs: number): string {
 }
 
 function ImageCell({ lot }: { lot: LotListItem }) {
-  if (!lot.primaryImageId) {
-    return (
-      <div className="flex h-11 w-16 items-center justify-center rounded-xl border border-dashed border-border text-[10px] text-muted-foreground">
-        none
-      </div>
-    );
-  }
-  const src = `/images/${lot.primaryImageId}`;
-  const detailUrl = `/lots/${lot.sourceKey}/${lot.lotNumber}`;
-  const previewMeta = [lot.modelYear ? `MY ${lot.modelYear}` : null, lot.location].filter(Boolean).join(" · ");
-
-  return (
-    <HoverCard closeDelay={80} openDelay={60}>
-      <HoverCardTrigger asChild>
-        <a className="group/image block cursor-zoom-in" href={detailUrl}>
-          <img
-            alt={lot.lotNumber}
-            className="h-11 w-16 rounded-xl object-cover ring-1 ring-foreground/10 transition-transform duration-200 group-hover/image:scale-[1.04]"
-            src={src}
-          />
-        </a>
-      </HoverCardTrigger>
-      <HoverCardContent
-        align="start"
-        className="hidden w-[min(42rem,calc(100vw-2rem))] overflow-hidden p-0 sm:block"
-        side="right"
-        sideOffset={18}
-      >
-        <img
-          alt={`${lot.carType} ${lot.lotNumber}`}
-          className="aspect-[4/3] w-full object-cover"
-          src={src}
-        />
-        <div className="flex flex-wrap items-start justify-between gap-4 border-t border-border/70 bg-popover/95 px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">{lot.sourceLabel}</p>
-            <p className="mt-1 text-xl font-semibold tracking-tight">{lot.carType}</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {lot.lotNumber}
-              {previewMeta ? ` · ${previewMeta}` : ""}
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full border border-border/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            Preview
-          </span>
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  );
+  return <LotImagePreview lot={lot} />;
 }
 
 function LotSourceCell({ lot }: { lot: LotListItem }) {

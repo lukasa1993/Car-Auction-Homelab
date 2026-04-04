@@ -932,6 +932,141 @@ function extractImageCandidatesFromHtml(html: string, baseUrl: string): string[]
   return [...results];
 }
 
+function stripCloudflareImageResize(url: string): string | null {
+  const match = url.match(/\/cdn-cgi\/image\/[^/]+\/(https?:\/\/.+)$/i);
+  return match ? match[1] : null;
+}
+
+function stripResizeSearchParams(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    let changed = false;
+    for (const key of ["width", "height", "w", "h", "quality", "q", "fit", "format", "dpr", "auto"]) {
+      if (parsed.searchParams.has(key)) {
+        parsed.searchParams.delete(key);
+        changed = true;
+      }
+    }
+    return changed ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildImageCandidateVariants(rawUrl: string, baseUrl: string): string[] {
+  const absolute = absolutizeUrl(rawUrl, baseUrl);
+  if (!absolute) {
+    return [];
+  }
+  const variants = new Set<string>();
+  const queue = [absolute];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || variants.has(current)) {
+      continue;
+    }
+    variants.add(current);
+
+    const cloudflareOriginal = stripCloudflareImageResize(current);
+    if (cloudflareOriginal && !variants.has(cloudflareOriginal)) {
+      queue.push(cloudflareOriginal);
+    }
+
+    const queryCleaned = stripResizeSearchParams(current);
+    if (queryCleaned && !variants.has(queryCleaned)) {
+      queue.push(queryCleaned);
+    }
+  }
+  return [...variants];
+}
+
+function extractLargestDimensionHint(text: string): number | null {
+  const matches = [...text.matchAll(/(\d{2,4})x(\d{2,4})/gi)];
+  if (matches.length === 0) {
+    return null;
+  }
+  return matches.reduce((largest, match) => {
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    return Math.max(largest, width, height);
+  }, 0);
+}
+
+function scoreImageCandidate(imageUrl: string): number {
+  let score = 0;
+  const normalized = imageUrl.toLowerCase();
+
+  if (/(^|[/?._-])(full|zoom|large|orig|original|hero|max|hires|hd)([/?._-]|$)/i.test(normalized)) {
+    score += 10;
+  }
+  if (/(^|[/?._-])(thumb|thumbnail|small|preview|icon|sprite)([/?._-]|$)/i.test(normalized)) {
+    score -= 10;
+  }
+  if (/\/cdn-cgi\/image\//i.test(normalized)) {
+    score -= 4;
+  }
+
+  const dimensionHint = extractLargestDimensionHint(normalized);
+  if (dimensionHint !== null) {
+    if (dimensionHint >= 1600) {
+      score += 8;
+    } else if (dimensionHint >= 1000) {
+      score += 5;
+    } else if (dimensionHint <= 400) {
+      score -= 8;
+    } else if (dimensionHint <= 800) {
+      score -= 4;
+    }
+  }
+
+  try {
+    const parsed = new URL(imageUrl);
+    const widthHint = Number(parsed.searchParams.get("width") || parsed.searchParams.get("w") || "");
+    const heightHint = Number(parsed.searchParams.get("height") || parsed.searchParams.get("h") || "");
+    const searchDimensionHint = Math.max(widthHint || 0, heightHint || 0);
+    if (searchDimensionHint >= 1600) {
+      score += 8;
+    } else if (searchDimensionHint >= 1000) {
+      score += 5;
+    } else if (searchDimensionHint > 0 && searchDimensionHint <= 400) {
+      score -= 8;
+    } else if (searchDimensionHint > 0 && searchDimensionHint <= 800) {
+      score -= 4;
+    }
+  } catch {
+    // ignore
+  }
+
+  return score;
+}
+
+function canonicalizeImageCandidate(imageUrl: string): string {
+  const withoutCloudflareResize = stripCloudflareImageResize(imageUrl) || imageUrl;
+  return stripResizeSearchParams(withoutCloudflareResize) || withoutCloudflareResize;
+}
+
+function prioritizeImageCandidates(imageCandidates: Iterable<string>, baseUrl: string): string[] {
+  const ranked = new Map<string, { url: string; score: number; order: number }>();
+  let order = 0;
+  for (const rawCandidate of imageCandidates) {
+    for (const variant of buildImageCandidateVariants(rawCandidate, baseUrl)) {
+      if (/sprite|logo|icon|avatar/i.test(variant)) {
+        continue;
+      }
+      const key = canonicalizeImageCandidate(variant);
+      const next = { url: variant, score: scoreImageCandidate(variant), order };
+      const existing = ranked.get(key);
+      if (!existing || next.score > existing.score || (next.score === existing.score && next.order < existing.order)) {
+        ranked.set(key, next);
+      }
+    }
+    order += 1;
+  }
+  return [...ranked.values()]
+    .sort((left, right) => right.score - left.score || left.order - right.order || left.url.localeCompare(right.url))
+    .map((entry) => entry.url);
+}
+
 async function collectPageImageCandidates(page: Page): Promise<string[]> {
   return await page.evaluate(() => {
     const attrs = ["src", "srcset", "data-src", "data-lazy", "data-zoom-image", "data-fullimage", "data-original"];
@@ -960,28 +1095,25 @@ async function collectPageImageCandidates(page: Page): Promise<string[]> {
 }
 
 async function enrichRecordImages(page: Page, item: ScrapedRecordWithImages): Promise<ScrapedRecordWithImages> {
-  if (item.imageCandidates.length > 0) {
-    return item;
+  const rankedSeedCandidates = prioritizeImageCandidates(item.imageCandidates, item.record.url);
+  if (rankedSeedCandidates.length > 0 && scoreImageCandidate(rankedSeedCandidates[0]) >= 6) {
+    return {
+      ...item,
+      imageCandidates: rankedSeedCandidates.slice(0, 8),
+    };
   }
   await page.goto(item.record.url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   await dismissBanners(page);
   await page.waitForTimeout(1500);
   const html = await page.content().catch(() => "");
   const domUrls = await collectPageImageCandidates(page);
-  const all = new Set<string>();
-  for (const url of [...domUrls, ...extractImageCandidatesFromHtml(html, item.record.url)]) {
-    const absolute = absolutizeUrl(url, item.record.url);
-    if (!absolute) {
-      continue;
-    }
-    if (/sprite|logo|icon|avatar/i.test(absolute)) {
-      continue;
-    }
-    all.add(absolute);
-  }
+  const prioritizedCandidates = prioritizeImageCandidates(
+    [...rankedSeedCandidates, ...domUrls, ...extractImageCandidatesFromHtml(html, item.record.url)],
+    item.record.url,
+  );
   return {
     ...item,
-    imageCandidates: [...all].slice(0, 8),
+    imageCandidates: prioritizedCandidates.slice(0, 8),
   };
 }
 
