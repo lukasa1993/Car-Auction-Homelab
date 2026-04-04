@@ -4,6 +4,8 @@ import { mkdir } from "node:fs/promises";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { DateTime } from "luxon";
 
+import { buildVinMaskRegex, normalizeVinPattern } from "../src/lib/vin-patterns";
+
 type SourceKey = "copart" | "iaai";
 type RunnerScopeStatus = "complete" | "failed" | "partial";
 
@@ -178,10 +180,6 @@ function stripHtml(html: string): string {
         .replace(/<[^>]+>/g, " "),
     ),
   );
-}
-
-function escapeRegex(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function pad2(value: number | string): string {
@@ -366,25 +364,17 @@ function isWithinSaleWindow(record: ScrapedLotRecord, nowIso: string, saleWindow
   return scheduledDate.isValid && scheduledDate >= now.startOf("day") && scheduledDate <= windowEnd;
 }
 
-function buildVinMaskRegex(mask: string, anchored = false): RegExp {
-  const escaped = escapeRegex(mask).replaceAll("\\?", "[A-HJ-NPR-Z0-9]");
-  const suffixLength = Math.max(0, 17 - mask.length);
-  const tail = suffixLength ? `[A-HJ-NPR-Z0-9*]{0,${suffixLength}}` : "";
-  const body = `${escaped}${tail}`;
-  return new RegExp(anchored ? `^${body}$` : `(${body})`, "i");
-}
-
 function matchVehicleVinCode(vinOrPrefix = "", target: VinTarget): string | null {
-  const normalized = String(vinOrPrefix || "").toUpperCase();
+  const normalized = normalizeVinPattern(vinOrPrefix);
   if (!normalized) {
     return null;
   }
-  return buildVinMaskRegex(target.vinPattern, true).test(normalized) ? target.vinPattern : null;
+  return buildVinMaskRegex(target.vinPattern, true).test(normalized) ? normalizeVinPattern(target.vinPattern) : null;
 }
 
 function extractMatchingVin(text: string, target: VinTarget): string {
   const match = text.match(buildVinMaskRegex(target.vinPattern));
-  return match?.[1]?.toUpperCase() || "";
+  return normalizeVinPattern(match?.[1] || "");
 }
 
 function matchesVehicleIdentity(text: string, url: string, target: VinTarget): boolean {
@@ -452,7 +442,7 @@ function buildRecord(sourceKey: SourceKey, yearPage: number, candidate: { text: 
   if (!vin) {
     return null;
   }
-  const matchedCode = matchVehicleVinCode(vin, target) || target.vinPattern;
+  const matchedCode = matchVehicleVinCode(vin, target) || normalizeVinPattern(target.vinPattern);
   const status = inferStatus(text);
   const dateInfo = parseAuctionDate(text, new Date(nowIso));
   const auctionDate = dateInfo ? dateInfo.value : "";
@@ -824,7 +814,7 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
   if (!matchesVehicleIdentity(text, item.ldu || item.ld || "", target)) {
     return null;
   }
-  const vin = String(item.fv || "").toUpperCase();
+  const vin = normalizeVinPattern(String(item.fv || ""));
   const matchedCode = matchVehicleVinCode(vin, target);
   if (!matchedCode) {
     return null;

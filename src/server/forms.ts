@@ -1,22 +1,20 @@
 import type { VinTarget } from "../lib/types";
+import { normalizeVinPattern } from "../lib/vin-patterns";
 
 export function parseTargetForm(form: FormData, defaults: Partial<VinTarget> = {}): Partial<VinTarget> & {
-  key: string;
-  label: string;
-  carType: string;
   vinPattern: string;
 } {
   return {
     id: defaults.id,
-    key: String(form.get("key") || defaults.key || "").trim(),
-    label: String(form.get("label") || defaults.label || "").trim(),
-    carType: String(form.get("carType") || defaults.carType || "").trim(),
-    vinPattern: String(form.get("vinPattern") || defaults.vinPattern || "").trim().toUpperCase(),
+    key: String(form.get("key") || defaults.key || "").trim() || undefined,
+    label: String(form.get("label") || defaults.label || "").trim() || undefined,
+    carType: String(form.get("carType") || defaults.carType || "").trim() || undefined,
+    vinPattern: normalizeVinPattern(String(form.get("vinPattern") || defaults.vinPattern || "")),
     marker: String(form.get("marker") || defaults.marker || "").trim() || undefined,
-    yearFrom: Number.parseInt(String(form.get("yearFrom") || defaults.yearFrom || "2024"), 10),
-    yearTo: Number.parseInt(String(form.get("yearTo") || defaults.yearTo || "2027"), 10),
-    copartSlug: String(form.get("copartSlug") || defaults.copartSlug || "").trim(),
-    iaaiPath: String(form.get("iaaiPath") || defaults.iaaiPath || "").trim(),
+    yearFrom: form.has("yearFrom") ? Number.parseInt(String(form.get("yearFrom") || defaults.yearFrom || "2024"), 10) : defaults.yearFrom,
+    yearTo: form.has("yearTo") ? Number.parseInt(String(form.get("yearTo") || defaults.yearTo || "2027"), 10) : defaults.yearTo,
+    copartSlug: String(form.get("copartSlug") || defaults.copartSlug || "").trim() || undefined,
+    iaaiPath: String(form.get("iaaiPath") || defaults.iaaiPath || "").trim() || undefined,
     enabledCopart: form.has("enabledCopart"),
     enabledIaai: form.has("enabledIaai"),
     active: form.has("active"),
@@ -31,5 +29,15 @@ export function parseLotActionPath(pathname: string): { lotId: string; action: "
   return {
     lotId: decodeURIComponent(match[1]),
     action: match[2] as "approve" | "remove" | "restore",
+  };
+}
+
+export function parsePublicRejectPath(pathname: string): { lotId: string } | null {
+  const match = pathname.match(/^\/lots\/([^/]+)\/reject$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    lotId: decodeURIComponent(match[1]),
   };
 }

@@ -3,14 +3,29 @@ import path from "node:path";
 
 import type { AuthState, ServerServices } from "./context";
 import type { SourceKey } from "../lib/types";
-import { notFoundResponse, renderPage } from "./responses";
+import { parsePublicRejectPath } from "./forms";
+import { notFoundResponse, redirect, renderPage } from "./responses";
 import { LotDetailPage } from "../ui/pages/lot-detail-page";
 
-export function handleEntityPages(
+export async function handleEntityPages(
+  request: Request,
   pathname: string,
   authState: AuthState,
   services: ServerServices,
-): Response | null {
+): Promise<Response | null> {
+  const publicReject = parsePublicRejectPath(pathname);
+  if (publicReject && request.method === "POST") {
+    const form = await request.formData();
+    const redirectTo = String(form.get("redirect") || "/");
+    services.store.setWorkflowState(
+      publicReject.lotId,
+      "removed",
+      authState.email || "public",
+      authState.email ? "Rejected from lot page" : "Rejected from public lot page",
+    );
+    return redirect(redirectTo);
+  }
+
   const lotMatch = pathname.match(/^\/lots\/(copart|iaai)\/([^/]+)$/);
   if (lotMatch) {
     const detail = services.store.getLotDetail(lotMatch[1] as SourceKey, decodeURIComponent(lotMatch[2]));

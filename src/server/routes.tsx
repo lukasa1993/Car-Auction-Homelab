@@ -44,7 +44,7 @@ export async function handleRequest(request: Request, services: ServerServices):
     return publicPageResponse;
   }
 
-  const entityResponse = handleEntityPages(pathname, authState, services);
+  const entityResponse = await handleEntityPages(request, pathname, authState, services);
   if (entityResponse) {
     return entityResponse;
   }

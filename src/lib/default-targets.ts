@@ -1,4 +1,5 @@
 import type { VinTarget } from "./types";
+import { deriveVinPrefix, normalizeVinPattern } from "./vin-patterns";
 
 function buildTarget(
   key: string,
@@ -12,13 +13,14 @@ function buildTarget(
   iaaiPath: string,
   sortOrder: number,
 ): Omit<VinTarget, "id" | "createdAt" | "updatedAt"> {
+  const normalizedVinPattern = normalizeVinPattern(vinPattern);
   return {
     key,
     label,
     carType,
     marker,
-    vinPattern,
-    vinPrefix: vinPattern.split("?")[0] ?? vinPattern,
+    vinPattern: normalizedVinPattern,
+    vinPrefix: deriveVinPrefix(normalizedVinPattern),
     yearFrom,
     yearTo,
     copartSlug,
@@ -60,7 +62,7 @@ export const DEFAULT_TARGETS = [
     "Model Y",
     "Tesla Model Y",
     "Model Y · 7SAYGDEE-TF family",
-    "7SAYGDEE?TF",
+    "7SAYGDEE*TF",
     2024,
     2027,
     "model-y",
@@ -72,7 +74,7 @@ export const DEFAULT_TARGETS = [
     "Model Y",
     "Tesla Model Y",
     "Model Y · 7SAYGDEE-TA family",
-    "7SAYGDEE?TA",
+    "7SAYGDEE*TA",
     2024,
     2027,
     "model-y",
@@ -84,7 +86,7 @@ export const DEFAULT_TARGETS = [
     "Model Y",
     "Tesla Model Y",
     "Model Y · 7SAYGAEE-TF family",
-    "7SAYGAEE?TF",
+    "7SAYGAEE*TF",
     2024,
     2027,
     "model-y",
@@ -96,7 +98,7 @@ export const DEFAULT_TARGETS = [
     "Model Y",
     "Tesla Model Y",
     "Model Y · 7SAYGAEE-TA family",
-    "7SAYGAEE?TA",
+    "7SAYGAEE*TA",
     2024,
     2027,
     "model-y",

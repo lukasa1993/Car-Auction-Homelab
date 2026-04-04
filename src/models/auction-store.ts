@@ -19,6 +19,7 @@ import type {
   WorkflowState,
 } from "../lib/types";
 import { extFromMimeType, normalizeWhitespace, sha256Hex } from "../lib/utils";
+import { deriveVinPrefix, inferVinTargetDefinition, normalizeVinPattern } from "../lib/vin-patterns";
 import { createSqliteDatabase } from "./sqlite";
 
 export interface StoreOptions {
@@ -71,14 +72,15 @@ function normalizeWorkflowState(status: string | null | undefined): WorkflowStat
 }
 
 function mapVinTarget(row: Record<string, unknown>): VinTarget {
+  const vinPattern = normalizeVinPattern(String(row.vin_pattern));
   return {
     id: String(row.id),
     key: String(row.key),
     label: String(row.label),
     carType: String(row.car_type),
     marker: String(row.marker),
-    vinPattern: String(row.vin_pattern),
-    vinPrefix: String(row.vin_prefix),
+    vinPattern,
+    vinPrefix: deriveVinPrefix(vinPattern),
     yearFrom: Number(row.year_from),
     yearTo: Number(row.year_to),
     copartSlug: String(row.copart_slug ?? ""),
@@ -93,6 +95,7 @@ function mapVinTarget(row: Record<string, unknown>): VinTarget {
 }
 
 function mapLotRow(row: Record<string, unknown>): LotRow {
+  const vinPattern = row.vin_pattern ? normalizeVinPattern(String(row.vin_pattern)) : null;
   return {
     id: String(row.id),
     sourceKey: String(row.source_key) as SourceKey,
@@ -102,7 +105,7 @@ function mapLotRow(row: Record<string, unknown>): LotRow {
     sourceDetailId: row.source_detail_id ? String(row.source_detail_id) : null,
     carType: String(row.car_type),
     marker: String(row.marker),
-    vinPattern: row.vin_pattern ? String(row.vin_pattern) : null,
+    vinPattern,
     vin: row.vin ? String(row.vin) : null,
     modelYear: row.model_year == null ? null : Number(row.model_year),
     yearPage: row.year_page == null ? null : Number(row.year_page),
@@ -368,27 +371,44 @@ export class AuctionStore {
     };
   }
 
-  upsertVinTarget(input: Partial<VinTarget> & { key: string; label: string; carType: string; vinPattern: string }): string {
+  private getNextVinTargetSortOrder(): number {
+    const row = this.db.query("SELECT COALESCE(MAX(sort_order), 0) AS sort_order FROM vin_targets").get() as {
+      sort_order?: number | null;
+    };
+    return Number(row?.sort_order ?? 0) + 10;
+  }
+
+  upsertVinTarget(input: Partial<VinTarget> & { vinPattern: string }): string {
+    const inferred = inferVinTargetDefinition(input.vinPattern);
+    if (!inferred.vinPattern) {
+      throw new Error("VIN pattern is required.");
+    }
     const existing = this.db
       .query("SELECT * FROM vin_targets WHERE id = ? OR key = ? LIMIT 1")
-      .get(input.id ?? "", input.key) as Record<string, unknown> | null;
+      .get(input.id ?? "", input.key ?? inferred.key) as Record<string, unknown> | null;
     const now = new Date().toISOString();
+    const label = input.label ?? (inferred.modelLabel ? inferred.label : String(existing?.label ?? inferred.label));
+    const carType = input.carType ?? (inferred.modelLabel ? inferred.carType : String(existing?.car_type ?? inferred.carType));
+    const yearFrom = input.yearFrom ?? (inferred.inferredYear ?? Number(existing?.year_from ?? inferred.yearFrom));
+    const yearTo = input.yearTo ?? (inferred.inferredYear ?? Number(existing?.year_to ?? inferred.yearTo));
+    const copartSlug = input.copartSlug ?? (inferred.copartSlug || String(existing?.copart_slug ?? ""));
+    const iaaiPath = input.iaaiPath ?? (inferred.iaaiPath || String(existing?.iaai_path ?? ""));
     const next = {
       id: input.id ?? (existing ? String(existing.id) : randomUUID()),
-      key: input.key,
-      label: input.label,
-      carType: input.carType,
-      marker: input.marker ?? `${input.label} · ${input.vinPattern}`,
-      vinPattern: input.vinPattern.toUpperCase(),
-      vinPrefix: (input.vinPattern.toUpperCase().split("?")[0] ?? input.vinPattern.toUpperCase()),
-      yearFrom: input.yearFrom ?? Number(existing?.year_from ?? 2024),
-      yearTo: input.yearTo ?? Number(existing?.year_to ?? 2027),
-      copartSlug: input.copartSlug ?? String(existing?.copart_slug ?? ""),
-      iaaiPath: input.iaaiPath ?? String(existing?.iaai_path ?? ""),
+      key: input.key ?? (existing ? String(existing.key) : inferred.key),
+      label,
+      carType,
+      marker: input.marker ?? `${label} · ${inferred.vinPattern}`,
+      vinPattern: inferred.vinPattern,
+      vinPrefix: inferred.vinPrefix,
+      yearFrom,
+      yearTo,
+      copartSlug,
+      iaaiPath,
       enabledCopart: input.enabledCopart ?? rowBool(existing?.enabled_copart ?? 1),
       enabledIaai: input.enabledIaai ?? rowBool(existing?.enabled_iaai ?? 1),
       active: input.active ?? rowBool(existing?.active ?? 1),
-      sortOrder: input.sortOrder ?? Number(existing?.sort_order ?? 0),
+      sortOrder: input.sortOrder ?? Number(existing?.sort_order ?? this.getNextVinTargetSortOrder()),
       createdAt: existing ? String(existing.created_at) : now,
       updatedAt: now,
     };

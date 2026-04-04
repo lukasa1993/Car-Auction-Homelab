@@ -42,7 +42,7 @@ export function LotDetailPage({
 }) {
   const lot = detail.lot;
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,rgba(253,250,244,0.96),rgba(246,240,230,0.94))]">
+    <main className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-[1280px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3">
           <a href="/">
@@ -69,8 +69,7 @@ export function LotDetailPage({
             <div className="space-y-2">
               <h1 className="font-display text-4xl tracking-[-0.04em] sm:text-5xl">{lot.carType}</h1>
               <p className="max-w-3xl text-base leading-7 text-muted-foreground">
-                Historical snapshots, moderation actions, source identifiers, and stored media stay
-                together on one row so the lot can change without losing its trail.
+                {lot.vin || lot.vinPattern || lot.lotNumber}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -79,33 +78,45 @@ export function LotDetailPage({
               {lot.location ? <Badge variant="muted">{lot.location}</Badge> : null}
               {lot.auctionDateRaw ? <Badge variant="outline">{lot.auctionDateRaw}</Badge> : null}
             </div>
-            {auth.admin ? (
-              <div className="flex flex-wrap gap-2">
-                {lot.workflowState !== "approved" ? (
-                  <form action={`/admin/lots/${lot.id}/approve`} method="post">
-                    <input name="redirect" type="hidden" value={`/lots/${lot.sourceKey}/${lot.lotNumber}`} />
-                    <Button type="submit">Approve</Button>
-                  </form>
-                ) : null}
-                {lot.workflowState !== "removed" ? (
-                  <form action={`/admin/lots/${lot.id}/remove`} method="post">
-                    <input name="redirect" type="hidden" value={`/lots/${lot.sourceKey}/${lot.lotNumber}`} />
-                    <Button type="submit" variant="outline">Remove</Button>
-                  </form>
-                ) : (
-                  <form action={`/admin/lots/${lot.id}/restore`} method="post">
-                    <input name="redirect" type="hidden" value={`/lots/${lot.sourceKey}/${lot.lotNumber}`} />
-                    <Button type="submit" variant="outline">Restore</Button>
-                  </form>
-                )}
-              </div>
-            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {lot.workflowState !== "removed" ? (
+                <form action={`/lots/${lot.id}/reject`} method="post">
+                  <input name="redirect" type="hidden" value="/" />
+                  <Button type="submit" variant="outline">Reject listing</Button>
+                </form>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  This listing is hidden from the public feed. Admin can restore it from <a className="font-medium text-foreground" href="/admin/history">history</a>.
+                </div>
+              )}
+              {auth.admin ? (
+                <>
+                  {lot.workflowState !== "approved" ? (
+                    <form action={`/admin/lots/${lot.id}/approve`} method="post">
+                      <input name="redirect" type="hidden" value={`/lots/${lot.sourceKey}/${lot.lotNumber}`} />
+                      <Button type="submit">Approve</Button>
+                    </form>
+                  ) : null}
+                  {lot.workflowState !== "removed" ? (
+                    <form action={`/admin/lots/${lot.id}/remove`} method="post">
+                      <input name="redirect" type="hidden" value={`/lots/${lot.sourceKey}/${lot.lotNumber}`} />
+                      <Button type="submit" variant="outline">Remove</Button>
+                    </form>
+                  ) : (
+                    <form action={`/admin/lots/${lot.id}/restore`} method="post">
+                      <input name="redirect" type="hidden" value={`/lots/${lot.sourceKey}/${lot.lotNumber}`} />
+                      <Button type="submit" variant="outline">Restore</Button>
+                    </form>
+                  )}
+                </>
+              ) : null}
+            </div>
           </div>
 
-          <Card className="bg-card/90">
+          <Card>
             <CardHeader>
-              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Current registry row</CardTitle>
-              <CardDescription>Canonical identifiers and last-seen source values.</CardDescription>
+              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Source identifiers</CardTitle>
+              <CardDescription>Identifiers and last-seen values.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 text-sm">
               <div className="grid grid-cols-2 gap-3">
@@ -143,17 +154,17 @@ export function LotDetailPage({
         </header>
 
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <Card className="bg-card/90">
+          <Card>
             <CardHeader>
-              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Stored images</CardTitle>
-              <CardDescription>Server-owned media files mounted from the auction host volume.</CardDescription>
+              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Images</CardTitle>
+              <CardDescription>Images from auction listing.</CardDescription>
             </CardHeader>
             <CardContent>
               {detail.images.length > 0 ? (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   {detail.images.map((image) => (
                     <a
-                      className="group overflow-hidden rounded-[28px] border border-border/70 bg-background/70"
+                      className="group overflow-hidden rounded-4xl border border-border/70 bg-background/70"
                       href={`/images/${image.id}`}
                       key={image.id}
                       rel="noreferrer"
@@ -168,7 +179,7 @@ export function LotDetailPage({
                   ))}
                 </div>
               ) : (
-                <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-[28px] border border-dashed border-border bg-muted/40 text-center">
+                <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-4xl border border-dashed border-border bg-muted/40 text-center">
                   <ImageIcon className="size-6 text-muted-foreground" />
                   <div>
                     <p className="font-medium">No images stored yet.</p>
@@ -179,10 +190,10 @@ export function LotDetailPage({
             </CardContent>
           </Card>
 
-          <Card className="bg-card/90">
+          <Card>
             <CardHeader>
-              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Manual actions</CardTitle>
-              <CardDescription>Moderation and workflow transitions are logged separately from scraper state.</CardDescription>
+              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Moderation log</CardTitle>
+              <CardDescription>Manual workflow transitions.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -217,10 +228,10 @@ export function LotDetailPage({
           </Card>
         </div>
 
-        <Card className="bg-card/90">
+        <Card>
           <CardHeader>
-            <CardTitle className="font-display text-2xl tracking-[-0.03em]">Snapshot history</CardTitle>
-            <CardDescription>Each scrape observation is appended so missing/canceled transitions stay attributable.</CardDescription>
+            <CardTitle className="font-display text-2xl tracking-[-0.03em]">Scrape history</CardTitle>
+            <CardDescription>Observation log from each scrape run.</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
             <Table className="min-w-[840px]">
