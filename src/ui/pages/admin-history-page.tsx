@@ -29,10 +29,7 @@ function sortHistory(lots: LotListItem[]): LotListItem[] {
 export function AdminHistoryPage({
   email,
   lots,
-}: {
-  email: string;
-  lots: LotListItem[];
-}) {
+}: AdminHistoryPageProps) {
   const removedLots = lots.filter((lot) => lot.workflowState === "removed");
   const visibleLots = sortHistory(lots);
 
@@ -139,4 +136,9 @@ export function AdminHistoryPage({
       </div>
     </main>
   );
+}
+
+export interface AdminHistoryPageProps {
+  email: string;
+  lots: LotListItem[];
 }

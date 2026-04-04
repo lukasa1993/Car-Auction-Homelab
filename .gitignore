@@ -4,6 +4,7 @@ collector/dist/
 dist/
 data/
 public/app.css
+public/app.js
 .env
 runner-keys/
 .playwright/

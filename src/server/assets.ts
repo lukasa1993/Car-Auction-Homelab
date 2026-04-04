@@ -37,6 +37,33 @@ export function ensureAppCss(config: ServerConfig): void {
   }
 }
 
+export function ensureAppClient(config: ServerConfig): void {
+  mkdirSync(config.publicDir, { recursive: true });
+
+  const build = Bun.spawnSync(
+    [
+      "bun",
+      "build",
+      config.appJsSource,
+      "--outfile",
+      config.appJsOutput,
+      "--target",
+      "browser",
+      "--minify",
+    ],
+    {
+      cwd: config.rootDir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env,
+    },
+  );
+
+  if (build.exitCode !== 0) {
+    throw new Error(`App bundle build failed:\n${build.stderr.toString()}`);
+  }
+}
+
 export function ensureCollectorBuild(config: ServerConfig): void {
   const runtimePackagePath = path.join(config.collectorRuntimeDir, "package.json");
   const runtimeExists = existsSync(runtimePackagePath);

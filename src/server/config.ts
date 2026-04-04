@@ -11,6 +11,8 @@ export interface ServerConfig {
   publicDir: string;
   appCssSource: string;
   appCssOutput: string;
+  appJsSource: string;
+  appJsOutput: string;
   port: number;
   host: string;
   baseUrl: string;
@@ -37,6 +39,8 @@ export function loadServerConfig(): ServerConfig {
   const publicDir = path.join(rootDir, "public");
   const appCssSource = path.join(rootDir, "src", "styles", "app.css");
   const appCssOutput = path.join(publicDir, "app.css");
+  const appJsSource = path.join(rootDir, "src", "ui", "client.tsx");
+  const appJsOutput = path.join(publicDir, "app.js");
   const port = Number.parseInt(process.env.PORT || process.env.AUCTION_PORT || "3005", 10);
   const host = process.env.HOST || process.env.AUCTION_HOST || "0.0.0.0";
   const baseUrl = (process.env.AUCTION_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
@@ -70,6 +74,8 @@ export function loadServerConfig(): ServerConfig {
     publicDir,
     appCssSource,
     appCssOutput,
+    appJsSource,
+    appJsOutput,
     port,
     host,
     baseUrl,

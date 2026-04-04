@@ -2,9 +2,6 @@ import { dispatchAuthRequest, forwardSetCookieHeaders } from "../lib/auth";
 import type { AuthState, ServerServices } from "./context";
 import { parseLotActionPath, parseTargetForm } from "./forms";
 import { authRedirectFromResponse, redirect, renderPage } from "./responses";
-import { AdminPage } from "../ui/pages/admin-page";
-import { AdminHistoryPage } from "../ui/pages/admin-history-page";
-import { AuthPage } from "../ui/pages/auth-page";
 
 export async function handleAdminPages(
   request: Request,
@@ -17,25 +14,38 @@ export async function handleAdminPages(
     if (!authState.signedIn) {
       return renderPage(
         "Admin Sign In",
-        <AuthPage
-          error={url.searchParams.get("error")}
-          mode={url.searchParams.get("mode") === "signup" ? "signup" : "signin"}
-        />,
+        {
+          kind: "auth",
+          props: {
+            error: url.searchParams.get("error"),
+            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
+          },
+        },
       );
     }
     if (!authState.admin || !authState.email) {
       return renderPage(
         "Admin Sign In",
-        <AuthPage
-          error="Admin access required"
-          mode={url.searchParams.get("mode") === "signup" ? "signup" : "signin"}
-        />,
+        {
+          kind: "auth",
+          props: {
+            error: "Admin access required",
+            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
+          },
+        },
       );
     }
     const historyCount = services.store.getLotList(true).filter((lot) => lot.workflowState !== "new").length;
     return renderPage(
       "Admin",
-      <AdminPage email={authState.email} historyCount={historyCount} targets={services.store.getVinTargets()} />,
+      {
+        kind: "admin",
+        props: {
+          email: authState.email,
+          historyCount,
+          targets: services.store.getVinTargets(),
+        },
+      },
     );
   }
 
@@ -43,23 +53,35 @@ export async function handleAdminPages(
     if (!authState.signedIn) {
       return renderPage(
         "Admin Sign In",
-        <AuthPage
-          error={url.searchParams.get("error")}
-          mode={url.searchParams.get("mode") === "signup" ? "signup" : "signin"}
-        />,
+        {
+          kind: "auth",
+          props: {
+            error: url.searchParams.get("error"),
+            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
+          },
+        },
       );
     }
     if (!authState.admin || !authState.email) {
       return renderPage(
         "Admin Sign In",
-        <AuthPage
-          error="Admin access required"
-          mode={url.searchParams.get("mode") === "signup" ? "signup" : "signin"}
-        />,
+        {
+          kind: "auth",
+          props: {
+            error: "Admin access required",
+            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
+          },
+        },
       );
     }
     const moderatedLots = services.store.getLotList(true).filter((lot) => lot.workflowState !== "new");
-    return renderPage("Admin History", <AdminHistoryPage email={authState.email} lots={moderatedLots} />);
+    return renderPage("Admin History", {
+      kind: "admin-history",
+      props: {
+        email: authState.email,
+        lots: moderatedLots,
+      },
+    });
   }
 
   if (pathname === "/admin/login" && request.method === "POST") {

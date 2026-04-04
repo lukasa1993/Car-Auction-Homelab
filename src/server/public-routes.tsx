@@ -34,11 +34,14 @@ export function handlePublicPages(
 
   return renderPage(
     "Tesla Auctions",
-    <MainPage
-      activeTab={activeTab}
-      allLots={allLots}
-      generatedAt={new Date().toISOString()}
-      lots={filteredLots}
-    />,
+    {
+      kind: "main",
+      props: {
+        activeTab,
+        allLots,
+        generatedAt: new Date().toISOString(),
+        lots: filteredLots,
+      },
+    },
   );
 }

@@ -1,8 +1,10 @@
 import * as React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToString } from "react-dom/server";
 
 import { forwardSetCookieHeaders } from "../lib/auth";
+import { AppShell } from "../ui/app-shell";
 import { AppDocument } from "../ui/document";
+import { renderAppPage, type AppPage } from "../ui/page-registry";
 
 export function notFoundResponse(message = "Not found"): Response {
   return Response.json({ error: message }, { status: 404 });
@@ -25,8 +27,12 @@ export function redirect(location: string, status = 302): Response {
   });
 }
 
-export function renderPage(title: string, body: React.ReactElement): Response {
-  return new Response(`<!doctype html>${renderToStaticMarkup(<AppDocument title={title}>{body}</AppDocument>)}`, {
+export function renderPage(title: string, page: AppPage): Response {
+  return new Response(`<!doctype html>${renderToString(
+    <AppDocument page={page} title={title}>
+      <AppShell>{renderAppPage(page)}</AppShell>
+    </AppDocument>,
+  )}`, {
     headers: {
       "content-type": "text/html; charset=utf-8",
     },

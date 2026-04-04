@@ -4,13 +4,15 @@ import { Button } from "../components/button";
 import { Input } from "../components/input";
 import { Label } from "../components/label";
 
+export interface AuthPageProps {
+  mode: "signin" | "signup";
+  error?: string | null;
+}
+
 export function AuthPage({
   mode,
   error,
-}: {
-  mode: "signin" | "signup";
-  error?: string | null;
-}) {
+}: AuthPageProps) {
   const isSignup = mode === "signup";
 
   return (

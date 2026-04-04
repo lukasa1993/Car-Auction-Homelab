@@ -1,7 +1,7 @@
 import { ensureBetterAuthSchema } from "./lib/auth";
 import { LiveEventBus } from "./lib/live-events";
 import { AuctionStore } from "./models/auction-store";
-import { ensureAppCss, ensureCollectorBuild } from "./server/assets";
+import { ensureAppClient, ensureAppCss, ensureCollectorBuild } from "./server/assets";
 import { loadServerConfig } from "./server/config";
 import { handleRequest } from "./server/routes";
 
@@ -9,6 +9,7 @@ async function bootstrap() {
   const config = loadServerConfig();
 
   ensureAppCss(config);
+  ensureAppClient(config);
   ensureCollectorBuild(config);
   await ensureBetterAuthSchema();
 

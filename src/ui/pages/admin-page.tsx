@@ -117,11 +117,7 @@ export function AdminPage({
   email,
   historyCount,
   targets,
-}: {
-  email: string;
-  historyCount: number;
-  targets: VinTarget[];
-}) {
+}: AdminPageProps) {
   const activeTargets = targets.filter((target) => target.active).length;
 
   return (
@@ -200,4 +196,10 @@ export function AdminPage({
       </div>
     </main>
   );
+}
+
+export interface AdminPageProps {
+  email: string;
+  historyCount: number;
+  targets: VinTarget[];
 }

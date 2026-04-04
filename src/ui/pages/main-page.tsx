@@ -3,9 +3,17 @@ import * as React from "react";
 import type { LotListItem } from "../../lib/types";
 import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/hover-card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 
 type Tab = "model3" | "modely" | "all";
+
+export interface MainPageProps {
+  lots: LotListItem[];
+  allLots: LotListItem[];
+  generatedAt: string;
+  activeTab: Tab;
+}
 
 function formatAuctionDateDisplay(lot: LotListItem) {
   if (lot.auctionDateRaw && lot.auctionDateRaw !== "future") {
@@ -37,6 +45,132 @@ function renderLotLink(lot: LotListItem) {
   return lot.sourceKey === "copart" ? lot.lotNumber : "open";
 }
 
+function formatAuctionCountdown(auctionDate: string | null | undefined, nowMs: number): string | null {
+  if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
+    return null;
+  }
+
+  const target = Date.parse(auctionDate);
+  if (Number.isNaN(target)) {
+    return null;
+  }
+
+  const diff = target - nowMs;
+  if (diff <= 0) {
+    return "Live now";
+  }
+
+  const totalSeconds = Math.floor(diff / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatLocalAuctionTime(auctionDate: string | null | undefined): string | null {
+  if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
+    return null;
+  }
+
+  const target = new Date(auctionDate);
+  if (Number.isNaN(target.getTime())) {
+    return null;
+  }
+
+  return `${new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(target)} local`;
+}
+
+function formatGeneratedAt(generatedAt: string, nowMs: number): string {
+  const generatedMs = Date.parse(generatedAt);
+  if (Number.isNaN(generatedMs)) {
+    return generatedAt;
+  }
+
+  const minutes = Math.floor((nowMs - generatedMs) / 60000);
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  if (minutes < 1440) {
+    return `${Math.floor(minutes / 60)}h ago`;
+  }
+  return `${Math.floor(minutes / 1440)}d ago`;
+}
+
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+function CopyLotButton({ lotNumber }: { lotNumber: string }) {
+  const [label, setLabel] = React.useState("copy");
+  const resetTimer = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      await copyText(lotNumber);
+      setLabel("Copied");
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+      resetTimer.current = window.setTimeout(() => {
+        setLabel("copy");
+      }, 1200);
+    } catch {
+      setLabel("Error");
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+      resetTimer.current = window.setTimeout(() => {
+        setLabel("copy");
+      }, 1200);
+    }
+  };
+
+  return (
+    <button
+      className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      onClick={handleCopy}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
 function ImageCell({ lot }: { lot: LotListItem }) {
   if (!lot.primaryImageId) {
     return (
@@ -47,23 +181,45 @@ function ImageCell({ lot }: { lot: LotListItem }) {
   }
   const src = `/images/${lot.primaryImageId}`;
   const detailUrl = `/lots/${lot.sourceKey}/${lot.lotNumber}`;
+  const previewMeta = [lot.modelYear ? `MY ${lot.modelYear}` : null, lot.location].filter(Boolean).join(" · ");
+
   return (
-    <div className="group/img relative">
-      <a href={detailUrl}>
+    <HoverCard closeDelay={80} openDelay={60}>
+      <HoverCardTrigger asChild>
+        <a className="group/image block cursor-zoom-in" href={detailUrl}>
+          <img
+            alt={lot.lotNumber}
+            className="h-11 w-16 rounded-xl object-cover ring-1 ring-foreground/10 transition-transform duration-200 group-hover/image:scale-[1.04]"
+            src={src}
+          />
+        </a>
+      </HoverCardTrigger>
+      <HoverCardContent
+        align="start"
+        className="hidden w-[min(42rem,calc(100vw-2rem))] overflow-hidden p-0 sm:block"
+        side="right"
+        sideOffset={18}
+      >
         <img
-          alt={lot.lotNumber}
-          className="h-11 w-16 rounded-xl object-cover ring-1 ring-foreground/10"
+          alt={`${lot.carType} ${lot.lotNumber}`}
+          className="aspect-[4/3] w-full object-cover"
           src={src}
         />
-      </a>
-      <div className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 hidden overflow-hidden rounded-3xl bg-card shadow-lg ring-1 ring-foreground/10 group-hover/img:block">
-        <img
-          alt={lot.lotNumber}
-          className="h-auto w-60 object-cover"
-          src={src}
-        />
-      </div>
-    </div>
+        <div className="flex flex-wrap items-start justify-between gap-4 border-t border-border/70 bg-popover/95 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">{lot.sourceLabel}</p>
+            <p className="mt-1 text-xl font-semibold tracking-tight">{lot.carType}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {lot.lotNumber}
+              {previewMeta ? ` · ${previewMeta}` : ""}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-border/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            Preview
+          </span>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 
@@ -73,13 +229,7 @@ function LotSourceCell({ lot }: { lot: LotListItem }) {
       <div className="flex items-center gap-2">
         <a href={lot.url} rel="noreferrer" target="_blank">{renderLotLink(lot)}</a>
         {lot.sourceKey === "copart" ? (
-          <button
-            className="copy-lot rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
-            data-copy-lot={lot.lotNumber}
-            type="button"
-          >
-            copy
-          </button>
+          <CopyLotButton lotNumber={lot.lotNumber} />
         ) : null}
       </div>
       {lot.location ? <span className="text-[11px] text-muted-foreground">{lot.location}</span> : null}
@@ -116,13 +266,18 @@ export function MainPage({
   allLots,
   generatedAt,
   activeTab,
-}: {
-  lots: LotListItem[];
-  allLots: LotListItem[];
-  generatedAt: string;
-  activeTab: Tab;
-}) {
-  const nowMs = Date.now();
+}: MainPageProps) {
+  const [nowMs, setNowMs] = React.useState(() => Date.parse(generatedAt) || Date.now());
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const soonLots = allLots.filter((lot) => isStartingSoon(lot, nowMs));
   const remainingLots = lots.filter((lot) => !isStartingSoon(lot, nowMs));
   const redirectTo = `/?tab=${activeTab}`;
@@ -132,7 +287,7 @@ export function MainPage({
       <div className="mx-auto flex max-w-[1040px] flex-col gap-4">
         <header className="flex items-baseline gap-2">
           <h1 className="text-base font-semibold">Tesla Auctions</h1>
-          <span className="text-[12px] text-muted-foreground" data-generated-at={generatedAt}>{generatedAt}</span>
+          <span className="text-[12px] text-muted-foreground">{formatGeneratedAt(generatedAt, nowMs)}</span>
         </header>
 
         {soonLots.length > 0 ? (
@@ -155,7 +310,7 @@ export function MainPage({
                   {soonLots.map((lot) => (
                     <TableRow key={`${lot.sourceKey}:${lot.lotNumber}`}>
                       <TableCell>
-                        <span className="whitespace-nowrap text-sm" data-auction-date={lot.auctionDate || ""}>{hasExactAuctionTime(lot.auctionDate) ? "Loading" : "Time TBD"}</span>
+                        <span className="whitespace-nowrap text-sm">{formatAuctionCountdown(lot.auctionDate, nowMs) || "Time TBD"}</span>
                         {lot.modelYear ? <span className="mt-0.5 block text-[11px] text-muted-foreground">MY {lot.modelYear}</span> : null}
                       </TableCell>
                       <TableCell><ImageCell lot={lot} /></TableCell>
@@ -200,13 +355,13 @@ export function MainPage({
                     className={lot.status === "done" ? "opacity-35" : ""}
                   >
                     <TableCell>
-                      <span className="whitespace-nowrap text-sm" data-auction-date={lot.auctionDate || ""}>{hasExactAuctionTime(lot.auctionDate) ? "Loading" : lot.auctionDate ? "Time TBD" : "Date pending"}</span>
+                      <span className="whitespace-nowrap text-sm">{formatAuctionCountdown(lot.auctionDate, nowMs) || (lot.auctionDate ? "Time TBD" : "Date pending")}</span>
                       {lot.modelYear ? <span className="mt-0.5 block text-[11px] text-muted-foreground">MY {lot.modelYear}</span> : null}
                     </TableCell>
                     <TableCell><ImageCell lot={lot} /></TableCell>
                     <TableCell className="hidden sm:table-cell">
                       <div className="text-sm">{formatAuctionDateDisplay(lot)}</div>
-                      {hasExactAuctionTime(lot.auctionDate) ? <div className="mt-0.5 text-[11px] text-muted-foreground" data-local-auction-date={lot.auctionDate || ""} /> : null}
+                      {hasExactAuctionTime(lot.auctionDate) ? <div className="mt-0.5 text-[11px] text-muted-foreground">{formatLocalAuctionTime(lot.auctionDate)}</div> : null}
                     </TableCell>
                     <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                     <TableCell><LotSourceCell lot={lot} /></TableCell>

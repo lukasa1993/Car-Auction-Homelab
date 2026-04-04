@@ -36,10 +36,7 @@ function workflowVariant(state: string): "success" | "destructive" | "outline" {
 export function LotDetailPage({
   detail,
   auth,
-}: {
-  detail: LotDetail;
-  auth: { signedIn: boolean; admin: boolean };
-}) {
+}: LotDetailPageProps) {
   const lot = detail.lot;
   return (
     <main className="min-h-screen bg-background">
@@ -272,4 +269,9 @@ export function LotDetailPage({
       </div>
     </main>
   );
+}
+
+export interface LotDetailPageProps {
+  detail: LotDetail;
+  auth: { signedIn: boolean; admin: boolean };
 }

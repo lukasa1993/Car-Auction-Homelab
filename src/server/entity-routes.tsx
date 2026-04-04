@@ -5,7 +5,6 @@ import type { AuthState, ServerServices } from "./context";
 import type { SourceKey } from "../lib/types";
 import { parsePublicRejectPath } from "./forms";
 import { notFoundResponse, redirect, renderPage } from "./responses";
-import { LotDetailPage } from "../ui/pages/lot-detail-page";
 
 export async function handleEntityPages(
   request: Request,
@@ -34,7 +33,13 @@ export async function handleEntityPages(
     }
     return renderPage(
       `${detail.lot.lotNumber} · ${detail.lot.sourceLabel}`,
-      <LotDetailPage auth={authState} detail={detail} />,
+      {
+        kind: "lot-detail",
+        props: {
+          auth: authState,
+          detail,
+        },
+      },
     );
   }
 
