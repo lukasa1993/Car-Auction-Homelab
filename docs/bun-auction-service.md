@@ -158,7 +158,7 @@ It uses the built-in `GITHUB_TOKEN` with `packages: write`, so no extra registry
 
 ## Mac Mini Deployment
 
-The Mac mini deployment should run from this repo with Docker Compose. GHCR remains optional, but the repo checkout is the deployment source of truth.
+The Mac mini should pull the published GHCR image. The repo checkout only provides the Compose file and deployment notes.
 
 1. On your local machine, generate the runtime env and signing keys:
 
@@ -197,11 +197,31 @@ cp runner-keys/collector-signing-key.pem /Users/l/_APPS/auction/runner-keys/
 cp runner-keys/collector-signing-key.pub.pem /Users/l/_APPS/auction/runner-keys/
 ```
 
-6. Build and run the service from the repo checkout:
+6. Pull and run the published image from the repo checkout:
 
 ```bash
 cd /Users/l/_APPS/auction/repo
-AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/mac-mini/compose.yml up -d --build
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/mac-mini/compose.yml pull
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/mac-mini/compose.yml up -d
+```
+
+By default the Compose file uses:
+
+```text
+ghcr.io/lukasa1993/car-auction-homelab:latest
+```
+
+To pin a different tag or digest temporarily:
+
+```bash
+cd /Users/l/_APPS/auction/repo
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
+AUCTION_IMAGE=ghcr.io/lukasa1993/car-auction-homelab:<tag-or-digest> \
+/usr/local/bin/docker compose -f deploy/mac-mini/compose.yml pull
+
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
+AUCTION_IMAGE=ghcr.io/lukasa1993/car-auction-homelab:<tag-or-digest> \
+/usr/local/bin/docker compose -f deploy/mac-mini/compose.yml up -d
 ```
 
 7. Change the live `auc.ldev.cloud` Caddy block from static `root * /Users/l/_APPS/caddy/site/auc.ldev.cloud` to a reverse proxy to `127.0.0.1:3005`.
@@ -235,4 +255,5 @@ rm -rf /Users/l/_APPS/caddy/site/auc.ldev.cloud
 - There is no dedicated scheduler container yet; the expected production pattern is cron invoking the collector bootstrap on chosen machines.
 - If you need more than one admin later, extend `AUCTION_ADMIN_EMAILS` in `.env` as a comma-separated list.
 - `collector/release/*` must be regenerated and pushed whenever the collector runtime changes.
+- `latest` only reflects the default branch. If the Mac mini needs a pre-merge image, publish and pin a non-`latest` tag first.
 - The app can still serve `/collector/runtime/*` for local development or fallback updates.

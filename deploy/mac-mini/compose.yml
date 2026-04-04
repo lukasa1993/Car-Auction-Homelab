@@ -1,10 +1,8 @@
 services:
   auction:
     container_name: auction
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    image: car-auction-homelab:local
+    image: ${AUCTION_IMAGE:-ghcr.io/lukasa1993/car-auction-homelab:latest}
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "127.0.0.1:3005:3005"
