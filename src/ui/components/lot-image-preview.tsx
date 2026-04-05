@@ -67,7 +67,7 @@ export function LotImagePreview({
             </p>
           </div>
           <span className="shrink-0 rounded-full border border-border/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            {lot.imageCount > 1 ? `${lot.imageCount} images` : "Preview"}
+            {lot.imageCount > 0 ? "HD image" : "Preview"}
           </span>
         </div>
       </HoverCardContent>

@@ -192,8 +192,8 @@ export function LotDetailPage({
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <Card>
             <CardHeader>
-              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Images</CardTitle>
-              <CardDescription>Images from auction listing.</CardDescription>
+              <CardTitle className="font-display text-2xl tracking-[-0.03em]">Image</CardTitle>
+              <CardDescription>Single stored HD image from the auction listing.</CardDescription>
             </CardHeader>
             <CardContent>
               {detail.images.length > 0 ? (

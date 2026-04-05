@@ -1,0 +1,108 @@
+export function hasExactAuctionTime(auctionDate: string | null | undefined): boolean {
+  return typeof auctionDate === "string" && auctionDate.includes("T");
+}
+
+export function formatAuctionCountdown(auctionDate: string | null | undefined, nowMs: number): string | null {
+  if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
+    return null;
+  }
+
+  const target = Date.parse(auctionDate);
+  if (Number.isNaN(target)) {
+    return null;
+  }
+
+  const diff = target - nowMs;
+  if (diff <= 0) {
+    return "Live now";
+  }
+
+  const totalSeconds = Math.floor(diff / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+export function formatLocalAuctionTime(auctionDate: string | null | undefined): string | null {
+  if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
+    return null;
+  }
+
+  const target = new Date(auctionDate);
+  if (Number.isNaN(target.getTime())) {
+    return null;
+  }
+
+  return `${new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(target)} local`;
+}
+
+export function formatAuctionDateDisplay(lot: {
+  auctionDate: string | null;
+  auctionDateRaw: string | null;
+}): string {
+  if (lot.auctionDateRaw && lot.auctionDateRaw !== "future") {
+    return lot.auctionDateRaw;
+  }
+  if (lot.auctionDate === "future") {
+    return "Future / upcoming";
+  }
+  return lot.auctionDate || "";
+}
+
+export function formatGeneratedAt(generatedAt: string, nowMs: number): string {
+  const generatedMs = Date.parse(generatedAt);
+  if (Number.isNaN(generatedMs)) {
+    return generatedAt;
+  }
+
+  const minutes = Math.floor((nowMs - generatedMs) / 60000);
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  if (minutes < 1440) {
+    return `${Math.floor(minutes / 60)}h ago`;
+  }
+  return `${Math.floor(minutes / 1440)}d ago`;
+}
+
+export function formatTimestamp(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return iso;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(ms));
+}
+
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
+export function stripTeslaPrefix(carType: string): string {
+  return carType.replace(/^Tesla\s+/, "");
+}

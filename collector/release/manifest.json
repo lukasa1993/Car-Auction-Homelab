@@ -1,15 +1,15 @@
 {
   "version": "2026.04.04.1",
   "minimumSupportedVersion": "2026.04.04.1",
-  "generatedAt": "2026-04-04T19:33:49.147Z",
-  "baseUrl": "https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/codex/auction-repo-deploy/collector/release",
+  "generatedAt": "2026-04-05T03:58:17.336Z",
+  "baseUrl": "https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release",
   "entrypoint": "auction-runner.js",
   "packageJsonPath": "package.json",
   "files": [
     {
       "path": "auction-runner.js",
-      "sha256": "efae14ac3fb1102ab83e422cc4357c3d5382abc2a755d884502651a0df59c7e7",
-      "byteSize": 21186
+      "sha256": "40241ff1fb46d2755fb1dbd6fa7d85758a8cf8f25a4484756045e5959a98fca5",
+      "byteSize": 26804
     },
     {
       "path": "bootstrap.js",

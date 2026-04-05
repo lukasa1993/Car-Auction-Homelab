@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
@@ -193,6 +193,8 @@ export class AuctionStore {
     this.mediaDir = options.mediaDir;
     this.db = createSqliteDatabase(options.databasePath, { strict: true });
     this.initSchema();
+    this.normalizeLotImages();
+    this.ensureSingleLotImageConstraint();
     this.seedDefaultTargets();
   }
 
@@ -352,6 +354,48 @@ export class AuctionStore {
         now,
       );
     }
+  }
+
+  private removeStoredImageFile(storagePath: string | null | undefined): void {
+    if (!storagePath) {
+      return;
+    }
+    try {
+      rmSync(path.join(this.mediaDir, storagePath), { force: true });
+    } catch {
+      // ignore storage cleanup failures
+    }
+  }
+
+  private normalizeLotImages(): void {
+    const rows = this.db.query(`
+      SELECT *
+      FROM lot_images
+      ORDER BY lot_id, active DESC, sort_order ASC, last_seen_at DESC, created_at DESC, id DESC
+    `).all() as Record<string, unknown>[];
+
+    const seenLotIds = new Set<string>();
+    for (const row of rows) {
+      const image = mapLotImage(row);
+      if (!seenLotIds.has(image.lotId)) {
+        seenLotIds.add(image.lotId);
+        this.db.query(`
+          UPDATE lot_images
+          SET active = 1, sort_order = 0
+          WHERE id = ?
+        `).run(image.id);
+        continue;
+      }
+
+      this.db.query("DELETE FROM lot_images WHERE id = ?").run(image.id);
+      this.removeStoredImageFile(image.storagePath);
+    }
+  }
+
+  private ensureSingleLotImageConstraint(): void {
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_lot_images_single_lot ON lot_images(lot_id);
+    `);
   }
 
   getVinTargets(activeOnly = false): VinTarget[] {
@@ -523,6 +567,17 @@ export class AuctionStore {
     return row ? mapLotImage(row) : null;
   }
 
+  getLotImageSyncState(sourceKey: SourceKey, lotNumber: string): LotImageRow | null {
+    const row = this.db.query(`
+      SELECT li.*
+      FROM lot_images li
+      INNER JOIN lots l ON l.id = li.lot_id
+      WHERE l.source_key = ? AND l.lot_number = ? AND li.active = 1
+      LIMIT 1
+    `).get(sourceKey, lotNumber) as Record<string, unknown> | null;
+    return row ? mapLotImage(row) : null;
+  }
+
   setWorkflowState(lotId: string, workflowState: WorkflowState, actor: string, note: string | null): void {
     const now = new Date().toISOString();
     const lotRow = this.db.query("SELECT * FROM lots WHERE id = ? LIMIT 1").get(lotId) as Record<string, unknown> | null;
@@ -634,33 +689,35 @@ export class AuctionStore {
     }
     const now = new Date().toISOString();
 
-    const existing = this.db.query("SELECT * FROM lot_images WHERE lot_id = ? AND sha256 = ? LIMIT 1").get(lot.id, sha256) as
-      | Record<string, unknown>
-      | null;
+    const existingRow = this.db.query("SELECT * FROM lot_images WHERE lot_id = ? LIMIT 1").get(lot.id) as Record<string, unknown> | null;
+    const existingImage = existingRow ? mapLotImage(existingRow) : null;
 
-    if (existing) {
+    if (existingImage && existingImage.sha256 === sha256) {
       this.db.query(`
         UPDATE lot_images
-        SET source_url = ?, storage_path = ?, mime_type = ?, byte_size = ?, width = ?, height = ?, sort_order = ?, last_seen_at = ?, last_sync_run_id = ?, active = 1
+        SET source_url = ?, storage_path = ?, mime_type = ?, sha256 = ?, byte_size = ?, width = ?, height = ?, sort_order = 0, last_seen_at = ?, last_sync_run_id = ?, active = 1
         WHERE id = ?
       `).run(
         input.sourceUrl,
         relativePath,
         mimeType,
+        sha256,
         bytes.length,
         input.width ?? null,
         input.height ?? null,
-        input.sortOrder,
         now,
         input.runId,
-        String(existing.id),
+        existingImage.id,
       );
-      this.db.query(`
-        UPDATE lot_images
-        SET active = 0
-        WHERE lot_id = ? AND sort_order = ? AND id != ?
-      `).run(lot.id, input.sortOrder, String(existing.id));
-      return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(String(existing.id)) as Record<string, unknown>);
+      if (existingImage.storagePath !== relativePath) {
+        this.removeStoredImageFile(existingImage.storagePath);
+      }
+      return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(existingImage.id) as Record<string, unknown>);
+    }
+
+    if (existingImage) {
+      this.db.query("DELETE FROM lot_images WHERE id = ?").run(existingImage.id);
+      this.removeStoredImageFile(existingImage.storagePath);
     }
 
     const id = randomUUID();
@@ -679,16 +736,11 @@ export class AuctionStore {
       bytes.length,
       input.width ?? null,
       input.height ?? null,
-      input.sortOrder,
+      0,
       now,
       now,
       input.runId,
     );
-    this.db.query(`
-      UPDATE lot_images
-      SET active = 0
-      WHERE lot_id = ? AND sort_order = ? AND id != ?
-    `).run(lot.id, input.sortOrder, id);
     return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(id) as Record<string, unknown>);
   }
 

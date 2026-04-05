@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { DateTime } from "luxon";
@@ -57,6 +58,14 @@ interface ScrapedRecordWithImages {
   imageCandidates: string[];
 }
 
+interface LotImageSyncState {
+  imageId: string;
+  sourceUrl: string;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+}
+
 interface CoveredScope {
   sourceKey: SourceKey;
   targetKey: string;
@@ -77,6 +86,9 @@ const packageJson = JSON.parse(await Bun.file(new URL("./package.json", import.m
 const RUNNER_VERSION = String(packageJson.version || "0.1.0");
 const DEFAULT_HTTP_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+const MAX_IMAGE_FETCH_ATTEMPTS = 4;
+const MIN_HD_LONG_EDGE = 1024;
+const MIN_HD_SHORT_EDGE = 720;
 
 const HTML_ENTITY_MAP: Record<string, string> = {
   amp: "&",
@@ -944,6 +956,201 @@ function compareVersionStrings(left: string, right: string): number {
   return 0;
 }
 
+function sha256Hex(bytes: Uint8Array): string {
+  const hash = createHash("sha256");
+  hash.update(bytes);
+  return hash.digest("hex");
+}
+
+function readUInt16BE(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset] << 8) | bytes[offset + 1];
+}
+
+function readUInt16LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readUInt24LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
+}
+
+function readUInt32BE(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset] * 0x1000000) +
+    (bytes[offset + 1] << 16) +
+    (bytes[offset + 2] << 8) +
+    bytes[offset + 3]
+  );
+}
+
+function extractPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (
+    bytes.length < 24 ||
+    bytes[0] !== 0x89 ||
+    bytes[1] !== 0x50 ||
+    bytes[2] !== 0x4e ||
+    bytes[3] !== 0x47 ||
+    bytes[4] !== 0x0d ||
+    bytes[5] !== 0x0a ||
+    bytes[6] !== 0x1a ||
+    bytes[7] !== 0x0a
+  ) {
+    return null;
+  }
+  return {
+    width: readUInt32BE(bytes, 16),
+    height: readUInt32BE(bytes, 20),
+  };
+}
+
+function extractGifDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 10) {
+    return null;
+  }
+  const signature = String.fromCharCode(...bytes.slice(0, 6));
+  if (signature !== "GIF87a" && signature !== "GIF89a") {
+    return null;
+  }
+  return {
+    width: readUInt16LE(bytes, 6),
+    height: readUInt16LE(bytes, 8),
+  };
+}
+
+function extractJpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    return null;
+  }
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    let markerOffset = offset + 1;
+    while (markerOffset < bytes.length && bytes[markerOffset] === 0xff) {
+      markerOffset += 1;
+    }
+    if (markerOffset >= bytes.length) {
+      return null;
+    }
+    const marker = bytes[markerOffset];
+    offset = markerOffset + 1;
+    if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+      continue;
+    }
+    if (offset + 1 >= bytes.length) {
+      return null;
+    }
+    const segmentLength = readUInt16BE(bytes, offset);
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) {
+      return null;
+    }
+    if (
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf)
+    ) {
+      return {
+        height: readUInt16BE(bytes, offset + 3),
+        width: readUInt16BE(bytes, offset + 5),
+      };
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
+function extractWebpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (
+    bytes.length < 30 ||
+    String.fromCharCode(...bytes.slice(0, 4)) !== "RIFF" ||
+    String.fromCharCode(...bytes.slice(8, 12)) !== "WEBP"
+  ) {
+    return null;
+  }
+  const chunkType = String.fromCharCode(...bytes.slice(12, 16));
+  if (chunkType === "VP8X" && bytes.length >= 30) {
+    return {
+      width: readUInt24LE(bytes, 24) + 1,
+      height: readUInt24LE(bytes, 27) + 1,
+    };
+  }
+  if (chunkType === "VP8L" && bytes.length >= 25 && bytes[20] === 0x2f) {
+    const b0 = bytes[21];
+    const b1 = bytes[22];
+    const b2 = bytes[23];
+    const b3 = bytes[24];
+    return {
+      width: 1 + (b0 | ((b1 & 0x3f) << 8)),
+      height: 1 + (((b1 & 0xc0) >> 6) | (b2 << 2) | ((b3 & 0x0f) << 10)),
+    };
+  }
+  if (chunkType === "VP8 " && bytes.length >= 30) {
+    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) {
+      return null;
+    }
+    return {
+      width: readUInt16LE(bytes, 26) & 0x3fff,
+      height: readUInt16LE(bytes, 28) & 0x3fff,
+    };
+  }
+  return null;
+}
+
+function extractImageDimensions(bytes: Uint8Array): { width: number | null; height: number | null } {
+  for (const extractor of [extractPngDimensions, extractGifDimensions, extractJpegDimensions, extractWebpDimensions]) {
+    const dimensions = extractor(bytes);
+    if (dimensions && dimensions.width > 0 && dimensions.height > 0) {
+      return dimensions;
+    }
+  }
+  return { width: null, height: null };
+}
+
+function normalizeMimeType(contentType: string | null | undefined): string {
+  return String(contentType || "application/octet-stream").split(";")[0].trim().toLowerCase();
+}
+
+function hasKnownImageDimensions(width: number | null, height: number | null): boolean {
+  return Number.isFinite(width) && Number.isFinite(height) && Number(width) > 0 && Number(height) > 0;
+}
+
+function isHdImage(width: number | null, height: number | null): boolean {
+  if (!hasKnownImageDimensions(width, height)) {
+    return false;
+  }
+  const safeWidth = Number(width);
+  const safeHeight = Number(height);
+  const longEdge = Math.max(safeWidth, safeHeight);
+  const shortEdge = Math.min(safeWidth, safeHeight);
+  return longEdge >= MIN_HD_LONG_EDGE && shortEdge >= MIN_HD_SHORT_EDGE;
+}
+
+function scoreFetchedImage(payload: { sourceUrl: string; width: number | null; height: number | null; byteSize: number }): number {
+  let score = scoreImageCandidate(payload.sourceUrl);
+  if (hasKnownImageDimensions(payload.width, payload.height)) {
+    const width = Number(payload.width);
+    const height = Number(payload.height);
+    const areaScore = Math.min(24, Math.round((width * height) / 250_000));
+    score += areaScore;
+    if (isHdImage(width, height)) {
+      score += 20;
+    } else {
+      score -= 20;
+    }
+  }
+  if (payload.byteSize >= 800_000) {
+    score += 8;
+  } else if (payload.byteSize >= 300_000) {
+    score += 4;
+  } else if (payload.byteSize < 120_000) {
+    score -= 8;
+  }
+  return score;
+}
+
 function extractImageCandidatesFromHtml(html: string, baseUrl: string): string[] {
   const results = new Set<string>();
   const patterns = [
@@ -1146,7 +1353,10 @@ async function enrichRecordImages(page: Page, item: ScrapedRecordWithImages): Pr
   };
 }
 
-async function fetchImagePayload(page: Page, imageUrl: string): Promise<{ sourceUrl: string; mimeType: string; width: number | null; height: number | null; dataBase64: string } | null> {
+async function fetchImagePayload(
+  page: Page,
+  imageUrl: string,
+): Promise<{ sourceUrl: string; mimeType: string; sha256: string; width: number | null; height: number | null; byteSize: number; dataBase64: string } | null> {
   try {
     const cookies = await page.context().cookies(imageUrl);
     const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
@@ -1165,17 +1375,61 @@ async function fetchImagePayload(page: Page, imageUrl: string): Promise<{ source
     if (bytes.length === 0) {
       return null;
     }
-    const mimeType = response.headers.get("content-type") || "application/octet-stream";
+    const mimeType = normalizeMimeType(response.headers.get("content-type"));
+    const { width, height } = extractImageDimensions(bytes);
     return {
       sourceUrl: imageUrl,
       mimeType,
-      width: null,
-      height: null,
+      sha256: sha256Hex(bytes),
+      width,
+      height,
+      byteSize: bytes.length,
       dataBase64: Buffer.from(bytes).toString("base64"),
     };
   } catch {
     return null;
   }
+}
+
+async function fetchLotImageSyncState(
+  baseUrl: string,
+  token: string,
+  sourceKey: SourceKey,
+  lotNumber: string,
+): Promise<LotImageSyncState | null> {
+  try {
+    const query = new URLSearchParams({ sourceKey, lotNumber });
+    const response = await fetch(`${baseUrl}/api/ingest/image-state?${query.toString()}`, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "cache-control": "no-store",
+      },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json() as LotImageSyncState | null;
+    if (!payload?.imageId || !payload?.sourceUrl || !payload?.sha256) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function selectBestImagePayload(
+  payloads: Array<{ sourceUrl: string; mimeType: string; sha256: string; width: number | null; height: number | null; byteSize: number; dataBase64: string }>,
+): { sourceUrl: string; mimeType: string; sha256: string; width: number | null; height: number | null; byteSize: number; dataBase64: string } | null {
+  const acceptable = payloads.filter((payload) => isHdImage(payload.width, payload.height) || !hasKnownImageDimensions(payload.width, payload.height));
+  if (acceptable.length === 0) {
+    return null;
+  }
+  return [...acceptable].sort((left, right) => (
+    scoreFetchedImage(right) - scoreFetchedImage(left) ||
+    right.byteSize - left.byteSize ||
+    right.sourceUrl.localeCompare(left.sourceUrl)
+  ))[0] || null;
 }
 
 async function uploadImages(baseUrl: string, token: string, runId: string, page: Page, items: ScrapedRecordWithImages[]): Promise<void> {
@@ -1185,15 +1439,51 @@ async function uploadImages(baseUrl: string, token: string, runId: string, page:
       console.warn(`No image candidates for ${item.record.sourceKey} lot ${item.record.lotNumber} ${item.record.url}`);
       continue;
     }
-    let sortOrder = 0;
-    let uploadedCount = 0;
-    for (const imageUrl of enriched.imageCandidates.slice(0, 8)) {
+
+    const currentImage = await fetchLotImageSyncState(baseUrl, token, item.record.sourceKey, item.record.lotNumber);
+    const topCandidate = enriched.imageCandidates[0];
+    if (currentImage && currentImage.sourceUrl === topCandidate && isHdImage(currentImage.width, currentImage.height)) {
+      continue;
+    }
+
+    const fetchedPayloads: Array<{
+      sourceUrl: string;
+      mimeType: string;
+      sha256: string;
+      width: number | null;
+      height: number | null;
+      byteSize: number;
+      dataBase64: string;
+    }> = [];
+
+    for (const imageUrl of enriched.imageCandidates.slice(0, MAX_IMAGE_FETCH_ATTEMPTS)) {
       const payload = await fetchImagePayload(page, imageUrl);
       if (!payload) {
         console.warn(`Image fetch failed for lot ${item.record.lotNumber}: ${imageUrl}`);
         continue;
       }
-      await fetch(`${baseUrl}/api/ingest/image`, {
+      fetchedPayloads.push(payload);
+    }
+
+    const selectedPayload = selectBestImagePayload(fetchedPayloads);
+    if (!selectedPayload) {
+      const bestMeasured = [...fetchedPayloads]
+        .sort((left, right) => scoreFetchedImage(right) - scoreFetchedImage(left) || right.byteSize - left.byteSize)[0];
+      if (bestMeasured && hasKnownImageDimensions(bestMeasured.width, bestMeasured.height)) {
+        console.warn(
+          `Skipping non-HD image for lot ${item.record.lotNumber}: ${bestMeasured.width}x${bestMeasured.height} ${bestMeasured.sourceUrl}`,
+        );
+      } else {
+        console.warn(`No acceptable image payloads for lot ${item.record.lotNumber}`);
+      }
+      continue;
+    }
+
+    if (currentImage && currentImage.sha256 === selectedPayload.sha256) {
+      continue;
+    }
+
+    await fetch(`${baseUrl}/api/ingest/image`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${token}`,
@@ -1203,22 +1493,14 @@ async function uploadImages(baseUrl: string, token: string, runId: string, page:
           runId,
           sourceKey: item.record.sourceKey,
           lotNumber: item.record.lotNumber,
-          sourceUrl: payload.sourceUrl,
-          mimeType: payload.mimeType,
-          width: payload.width,
-          height: payload.height,
-          sortOrder,
-          dataBase64: payload.dataBase64,
+          sourceUrl: selectedPayload.sourceUrl,
+          mimeType: selectedPayload.mimeType,
+          width: selectedPayload.width,
+          height: selectedPayload.height,
+          sortOrder: 0,
+          dataBase64: selectedPayload.dataBase64,
         }),
       }).catch(() => {});
-      sortOrder += 1;
-      uploadedCount += 1;
-    }
-    if (uploadedCount === 0) {
-      console.warn(
-        `Found ${enriched.imageCandidates.length} image candidates but uploaded 0 for lot ${item.record.lotNumber}`,
-      );
-    }
   }
 }
 

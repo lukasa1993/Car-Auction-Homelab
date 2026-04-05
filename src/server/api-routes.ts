@@ -51,6 +51,29 @@ export async function handleApiRoutes(
     return Response.json(result);
   }
 
+  if (pathname === "/api/ingest/image-state" && request.method === "GET") {
+    if (!requireBearer(request, services.config.ingestToken)) {
+      return unauthorizedResponse();
+    }
+    const sourceKey = url.searchParams.get("sourceKey") as SourceKey | null;
+    const lotNumber = url.searchParams.get("lotNumber");
+    if (!sourceKey || !lotNumber) {
+      return badRequestResponse("Missing image state lookup params");
+    }
+    const image = services.store.getLotImageSyncState(sourceKey, lotNumber);
+    return Response.json(
+      image
+        ? {
+            imageId: image.id,
+            sourceUrl: image.sourceUrl,
+            sha256: image.sha256,
+            width: image.width,
+            height: image.height,
+          }
+        : null,
+    );
+  }
+
   if (pathname === "/api/ingest/image" && request.method === "POST") {
     if (!requireBearer(request, services.config.ingestToken)) {
       return unauthorizedResponse();

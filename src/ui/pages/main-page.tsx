@@ -6,6 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
 import { CopyTextButton } from "../components/copy-text-button";
 import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
+import {
+  formatAuctionCountdown,
+  formatAuctionDateDisplay,
+  formatGeneratedAt,
+  formatLocalAuctionTime,
+  hasExactAuctionTime,
+} from "../format";
 
 type Tab = "model3" | "modely" | "all";
 
@@ -14,20 +21,6 @@ export interface MainPageProps {
   allLots: LotListItem[];
   generatedAt: string;
   activeTab: Tab;
-}
-
-function formatAuctionDateDisplay(lot: LotListItem) {
-  if (lot.auctionDateRaw && lot.auctionDateRaw !== "future") {
-    return lot.auctionDateRaw;
-  }
-  if (lot.auctionDate === "future") {
-    return "Future / upcoming";
-  }
-  return lot.auctionDate || "";
-}
-
-function hasExactAuctionTime(auctionDate: string | null | undefined): boolean {
-  return typeof auctionDate === "string" && auctionDate.includes("T");
 }
 
 function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
@@ -40,72 +33,6 @@ function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
   }
   const diff = target - nowMs;
   return diff > 0 && diff <= 12 * 60 * 60 * 1000;
-}
-
-function formatAuctionCountdown(auctionDate: string | null | undefined, nowMs: number): string | null {
-  if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
-    return null;
-  }
-
-  const target = Date.parse(auctionDate);
-  if (Number.isNaN(target)) {
-    return null;
-  }
-
-  const diff = target - nowMs;
-  if (diff <= 0) {
-    return "Live now";
-  }
-
-  const totalSeconds = Math.floor(diff / 1000);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (days > 0) {
-    return `${days}d ${hours}h ${minutes}m`;
-  }
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
-  }
-  return `${minutes}m ${seconds}s`;
-}
-
-function formatLocalAuctionTime(auctionDate: string | null | undefined): string | null {
-  if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
-    return null;
-  }
-
-  const target = new Date(auctionDate);
-  if (Number.isNaN(target.getTime())) {
-    return null;
-  }
-
-  return `${new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(target)} local`;
-}
-
-function formatGeneratedAt(generatedAt: string, nowMs: number): string {
-  const generatedMs = Date.parse(generatedAt);
-  if (Number.isNaN(generatedMs)) {
-    return generatedAt;
-  }
-
-  const minutes = Math.floor((nowMs - generatedMs) / 60000);
-  if (minutes < 1) {
-    return "just now";
-  }
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  if (minutes < 1440) {
-    return `${Math.floor(minutes / 60)}h ago`;
-  }
-  return `${Math.floor(minutes / 1440)}d ago`;
 }
 
 function ImageCell({ lot }: { lot: LotListItem }) {
