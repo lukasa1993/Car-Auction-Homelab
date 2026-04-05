@@ -64,23 +64,78 @@ function TabLink({ href, active, children }: { href: string; active: boolean; ch
   );
 }
 
-function RejectListingButton({ lot, redirectTo }: { lot: LotListItem; redirectTo: string }) {
+function RejectListingButton({
+  lot,
+  onRejected,
+  redirectTo,
+}: {
+  lot: LotListItem;
+  onRejected: (lotId: string) => void;
+  redirectTo: string;
+}) {
+  const [isPending, setIsPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleSubmit = React.useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isPending) {
+      return;
+    }
+
+    const form = event.currentTarget;
+    setIsPending(true);
+    setError(null);
+
+    try {
+      const response = await fetch(form.action, {
+        method: form.method,
+        body: new FormData(form),
+        headers: {
+          "x-auction-request": "async",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Reject failed with status ${response.status}`);
+      }
+
+      onRejected(lot.id);
+    } catch {
+      setError("Failed");
+    } finally {
+      setIsPending(false);
+    }
+  }, [isPending, lot.id, onRejected]);
+
   return (
-    <form action={`/lots/${lot.id}/reject`} method="post">
+    <form action={`/lots/${lot.id}/reject`} method="post" onSubmit={handleSubmit}>
       <input name="redirect" type="hidden" value={redirectTo} />
-      <Button size="sm" type="submit" variant="outline">Reject</Button>
+      <div className="flex flex-col items-end gap-1">
+        <Button disabled={isPending} size="sm" type="submit" variant="outline">
+          {isPending ? "Rejecting..." : "Reject"}
+        </Button>
+        {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
+      </div>
     </form>
   );
 }
 
-function LotRowActions({ lot, redirectTo }: { lot: LotListItem; redirectTo: string }) {
+function LotRowActions({
+  lot,
+  onRejected,
+  redirectTo,
+}: {
+  lot: LotListItem;
+  onRejected: (lotId: string) => void;
+  redirectTo: string;
+}) {
   return (
     <div className="flex flex-wrap justify-end gap-2">
       <a href={lot.url} rel="noreferrer" target="_blank">
         <Button size="sm" variant="outline">Open</Button>
       </a>
       <CopyTextButton value={lot.lotNumber} />
-      <RejectListingButton lot={lot} redirectTo={redirectTo} />
+      <RejectListingButton lot={lot} onRejected={onRejected} redirectTo={redirectTo} />
     </div>
   );
 }
@@ -91,6 +146,8 @@ export function MainPage({
   generatedAt,
   activeTab,
 }: MainPageProps) {
+  const [allLotsState, setAllLotsState] = React.useState(allLots);
+  const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
   const [nowMs, setNowMs] = React.useState(() => Date.parse(generatedAt) || Date.now());
 
   React.useEffect(() => {
@@ -102,8 +159,13 @@ export function MainPage({
     };
   }, []);
 
-  const soonLots = allLots.filter((lot) => isStartingSoon(lot, nowMs));
-  const remainingLots = lots.filter((lot) => !isStartingSoon(lot, nowMs));
+  const handleRejected = React.useCallback((lotId: string) => {
+    setAllLotsState((current) => current.filter((lot) => lot.id !== lotId));
+    setVisibleLotsState((current) => current.filter((lot) => lot.id !== lotId));
+  }, []);
+
+  const soonLots = allLotsState.filter((lot) => isStartingSoon(lot, nowMs));
+  const remainingLots = visibleLotsState.filter((lot) => !isStartingSoon(lot, nowMs));
   const redirectTo = `/?tab=${activeTab}`;
 
   return (
@@ -141,7 +203,7 @@ export function MainPage({
                       <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                       <TableCell><LotSourceCell lot={lot} /></TableCell>
                       <TableCell className="text-right">
-                        <LotRowActions lot={lot} redirectTo={redirectTo} />
+                        <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -190,7 +252,7 @@ export function MainPage({
                     <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
                     <TableCell><LotSourceCell lot={lot} /></TableCell>
                     <TableCell className="text-right">
-                      <LotRowActions lot={lot} redirectTo={redirectTo} />
+                      <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                     </TableCell>
                   </TableRow>
                 ))}

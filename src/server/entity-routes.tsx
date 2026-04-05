@@ -22,6 +22,9 @@ export async function handleEntityPages(
       authState.email || "public",
       authState.email ? "Rejected from lot page" : "Rejected from public lot page",
     );
+    if (request.headers.get("x-auction-request") === "async") {
+      return Response.json({ ok: true, lotId: publicReject.lotId, workflowState: "removed" });
+    }
     return redirect(redirectTo);
   }
 
