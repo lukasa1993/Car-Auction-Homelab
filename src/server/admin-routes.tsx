@@ -18,7 +18,6 @@ export async function handleAdminPages(
           kind: "auth",
           props: {
             error: url.searchParams.get("error"),
-            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
           },
         },
       );
@@ -30,7 +29,6 @@ export async function handleAdminPages(
           kind: "auth",
           props: {
             error: "Admin access required",
-            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
           },
         },
       );
@@ -57,7 +55,6 @@ export async function handleAdminPages(
           kind: "auth",
           props: {
             error: url.searchParams.get("error"),
-            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
           },
         },
       );
@@ -69,7 +66,6 @@ export async function handleAdminPages(
           kind: "auth",
           props: {
             error: "Admin access required",
-            mode: url.searchParams.get("mode") === "signup" ? "signup" : "signin",
           },
         },
       );
@@ -93,14 +89,8 @@ export async function handleAdminPages(
     return await authRedirectFromResponse(response, "/admin", "/admin");
   }
 
-  if (pathname === "/admin/signup" && request.method === "POST") {
-    const form = await request.formData();
-    const response = await dispatchAuthRequest("/api/auth/sign-up/email", request, {
-      name: String(form.get("name") || ""),
-      email: String(form.get("email") || ""),
-      password: String(form.get("password") || ""),
-    });
-    return await authRedirectFromResponse(response, "/admin", "/admin?mode=signup");
+  if (pathname === "/admin/signup") {
+    return redirect("/admin?error=Account%20creation%20is%20disabled");
   }
 
   if (pathname === "/admin/logout" && request.method === "POST") {

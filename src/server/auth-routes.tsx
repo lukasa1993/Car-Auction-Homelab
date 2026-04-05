@@ -7,6 +7,16 @@ export async function handleAuthPages(
   _url: URL,
   _authState: AuthState,
 ): Promise<Response | null> {
+  if (pathname === "/api/auth/sign-up/email") {
+    return Response.json(
+      {
+        error: "Account creation is disabled",
+        message: "Account creation is disabled",
+      },
+      { status: 403 },
+    );
+  }
+
   if (pathname.startsWith("/api/auth/")) {
     return await auth.handler(request);
   }
