@@ -88,7 +88,6 @@ const DEFAULT_HTTP_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
 const MAX_IMAGE_FETCH_ATTEMPTS = 4;
 const IMAGE_UPLOAD_CONCURRENCY = 4;
-const LIST_PHASE_STAGGER_MS = 500;
 const COPART_TARGET_DELAY_MS = 2500;
 const COPART_READY_SETTLE_MS = 1500;
 const COPART_API_PAGE_DELAY_MS = 1250;
@@ -986,8 +985,8 @@ async function fetchIaaiDirectMatches(page: Page, target: VinTarget, nowIso: str
   return { records, pagesFetched, candidatesScanned };
 }
 
-async function launchAuctionContext(headless: boolean): Promise<BrowserContext> {
-  const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", "playwright-profile");
+async function launchAuctionContext(headless: boolean, profileKey: SourceKey): Promise<BrowserContext> {
+  const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", `playwright-profile-${profileKey}`);
   await mkdir(profileDir, { recursive: true });
   return await chromium.launchPersistentContext(profileDir, {
     headless,
@@ -1129,6 +1128,19 @@ function collectImageUrlsFromValue(value: unknown, results: Set<string>, baseOri
   }
 }
 
+function collectCopartListImageCandidates(item: any): string[] {
+  const candidates = new Set<string>();
+  collectImageUrlsFromValue(item, candidates, "https://www.copart.com");
+  const promoted = new Set<string>();
+  for (const candidate of candidates) {
+    promoted.add(candidate);
+    for (const variant of buildCopartImageVariants(candidate)) {
+      promoted.add(variant);
+    }
+  }
+  return [...promoted];
+}
+
 function buildCopartApiAuctionRaw(item: any): string {
   if (item?.ad) {
     const zone = getLuxonZone(item.tz);
@@ -1217,9 +1229,8 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
   if (!record.lotNumber || !isUpcomingStatus(record, nowIso) || !isWithinSaleWindow(record, nowIso)) {
     return null;
   }
-  const imageCandidates = new Set<string>();
-  collectImageUrlsFromValue(item, imageCandidates, "https://www.copart.com");
-  return { record, imageCandidates: [...imageCandidates].slice(0, 8) };
+  const imageCandidates = prioritizeImageCandidates(collectCopartListImageCandidates(item), record.url);
+  return { record, imageCandidates: imageCandidates.slice(0, 8) };
 }
 
 async function fetchCopartMatches(page: Page, target: VinTarget, nowIso: string): Promise<ScrapedRecordWithImages[]> {
@@ -2067,25 +2078,22 @@ async function main(): Promise<void> {
   const scopes: CoveredScope[] = [];
   const allRecords: ScrapedRecordWithImages[] = [];
 
-  let context: BrowserContext | null = null;
+  const sourceContexts: Partial<Record<SourceKey, BrowserContext>> = {};
   try {
-    if (args.siteKeys.includes("copart") || args.siteKeys.includes("iaai")) {
-      context = await launchAuctionContext(args.headless);
-    }
-    const listPhaseTasks: Array<Promise<ScrapedRecordWithImages[]>> = [];
     if (args.siteKeys.includes("copart")) {
-      const page = context?.pages()[0] || await context!.newPage();
-      listPhaseTasks.push(scrapeCopartTargets(page, activeTargets, nowIso, scopes));
+      sourceContexts.copart = await launchAuctionContext(args.headless, "copart");
     }
     if (args.siteKeys.includes("iaai")) {
-      const iaaiPage = context?.pages()[1] || await context!.newPage();
-      const iaaiDelayMs = args.siteKeys.includes("copart") ? LIST_PHASE_STAGGER_MS : 0;
-      listPhaseTasks.push((async () => {
-        if (iaaiDelayMs > 0) {
-          await delay(iaaiDelayMs);
-        }
-        return await scrapeIaaiTargets(iaaiPage, activeTargets, nowIso, scopes);
-      })());
+      sourceContexts.iaai = await launchAuctionContext(args.headless, "iaai");
+    }
+    const listPhaseTasks: Array<Promise<ScrapedRecordWithImages[]>> = [];
+    if (sourceContexts.copart) {
+      const page = sourceContexts.copart.pages()[0] || await sourceContexts.copart.newPage();
+      listPhaseTasks.push(scrapeCopartTargets(page, activeTargets, nowIso, scopes));
+    }
+    if (sourceContexts.iaai) {
+      const iaaiPage = sourceContexts.iaai.pages()[0] || await sourceContexts.iaai.newPage();
+      listPhaseTasks.push(scrapeIaaiTargets(iaaiPage, activeTargets, nowIso, scopes));
     }
     const listPhaseRecords = await Promise.all(listPhaseTasks);
     allRecords.push(...listPhaseRecords.flat());
@@ -2096,12 +2104,31 @@ async function main(): Promise<void> {
     const ingestResult = await postIngest(args.baseUrl, ingestToken, scopes, dedupedRecords, args, startedAt, completedAt);
     console.log(`Ingested ${dedupedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);
 
-    if (context) {
-      await uploadImages(args.baseUrl, ingestToken, ingestResult.runId, context, dedupedRecords);
-    }
+    await Promise.all([
+      sourceContexts.copart
+        ? uploadImages(
+            args.baseUrl,
+            ingestToken,
+            ingestResult.runId,
+            sourceContexts.copart,
+            dedupedRecords.filter((item) => item.record.sourceKey === "copart"),
+          )
+        : Promise.resolve(),
+      sourceContexts.iaai
+        ? uploadImages(
+            args.baseUrl,
+            ingestToken,
+            ingestResult.runId,
+            sourceContexts.iaai,
+            dedupedRecords.filter((item) => item.record.sourceKey === "iaai"),
+          )
+        : Promise.resolve(),
+    ]);
   } finally {
-    if (context) {
-      await context.close().catch(() => {});
+    for (const context of Object.values(sourceContexts)) {
+      if (context) {
+        await context.close().catch(() => {});
+      }
     }
   }
 }
