@@ -577,22 +577,26 @@ interface IaaiSearchSnapshot {
   candidates: IaaiSearchCandidate[];
 }
 
-async function readIaaiSearchSnapshot(page: Page): Promise<IaaiSearchSnapshot> {
+interface IaaiBootstrapState {
+  title: string;
+  bodyPreview: string;
+  failure: "access-denied" | "blocked" | null;
+  noResults: boolean;
+  ready: boolean;
+}
+
+async function readIaaiBootstrapState(page: Page): Promise<IaaiBootstrapState> {
   await dismissBanners(page);
   return await page.evaluate(() => {
     const normalize = (value: string | null | undefined) => String(value || "").replace(/\s+/g, " ").trim();
-    const readTitleValue = (root: ParentNode, prefix: string) =>
-      normalize(root.querySelector<HTMLElement>(`[title^="${prefix}"]`)?.textContent);
     const bodyText = normalize(document.body?.innerText || "");
     const lower = bodyText.toLowerCase();
     const title = document.title;
     const searchHistory = document.querySelector<HTMLElement>("#searchHistory");
     const currentPageInput = document.querySelector<HTMLInputElement>("#CurrentPage");
     const pageSizeInput = document.querySelector<HTMLInputElement>("#PageSize");
-    const currentPage = Number(searchHistory?.dataset.currentpage || currentPageInput?.value || 1);
     const resultCount = Number(searchHistory?.dataset.resultcount || 0);
     const pageSize = Number(searchHistory?.dataset.pagesize || pageSizeInput?.value || 100);
-    const totalPages = resultCount > 0 && pageSize > 0 ? Math.ceil(resultCount / pageSize) : 0;
     let failure: "access-denied" | "blocked" | null = null;
     if (
       /noaccess/i.test(title) ||
@@ -606,113 +610,31 @@ async function readIaaiSearchSnapshot(page: Page): Promise<IaaiSearchSnapshot> {
     ) {
       failure = "blocked";
     }
-
-    const candidates: IaaiSearchCandidate[] = [];
-    const seenUrls = new Set<string>();
-    for (const block of Array.from(document.querySelectorAll<HTMLElement>(".table-row.table-row-border"))) {
-      const titleLink = block.querySelector<HTMLAnchorElement>('h4 a[href*="/VehicleDetail/"]');
-      if (!titleLink) {
-        continue;
-      }
-      const href = titleLink.getAttribute("href") || "";
-      const url = href ? new URL(href, window.location.origin).toString() : "";
-      if (!url || seenUrls.has(url)) {
-        continue;
-      }
-      seenUrls.add(url);
-
-      const stockNumber = readTitleValue(block, "Stock #:");
-      const saleDoc = readTitleValue(block, "Title/Sale Doc:");
-      const primaryDamage = readTitleValue(block, "Primary Damage:");
-      const secondaryDamage = readTitleValue(block, "Secondary Damage:");
-      const lossType = readTitleValue(block, "Loss:");
-      const odometer = readTitleValue(block, "Odometer:");
-      const startCode = readTitleValue(block, "Start Code:");
-      const airbags = readTitleValue(block, "Airbags:");
-      const keyState = readTitleValue(block, "Key :") || readTitleValue(block, "Key:");
-      const engine = readTitleValue(block, "Engine:");
-      const fuelType = readTitleValue(block, "Fuel Type:");
-      const transmission = readTitleValue(block, "Transmission:");
-      const driveline = readTitleValue(block, "Driveline Type:");
-      const market = readTitleValue(block, "Market:");
-      const acv = readTitleValue(block, "ACV:");
-      const vin = normalize(block.querySelector<HTMLElement>('[id^="VIN-"]')?.textContent);
-      const branch = normalize(block.querySelector<HTMLElement>('a[aria-label="Branch Name"]')?.textContent);
-      const vehicleLocation = normalize(block.querySelector<HTMLElement>('.text-md[title^="Vehicle Location:"]')?.textContent);
-      const auctionDate = normalize(
-        block.querySelector<HTMLElement>(".data-list--action .data-list__item:first-child .data-list__value--action")?.textContent,
-      );
-      const actionTexts = Array.from(block.querySelectorAll<HTMLElement>(".data-list--action a, .data-list--action .data-list__value--action"))
-        .map((element) => normalize(element.textContent))
-        .filter(Boolean);
-      const imageCandidates = Array.from(
-        new Set(
-          [block.querySelector<HTMLImageElement>("img[data-src]")?.getAttribute("data-src"), block.querySelector<HTMLImageElement>("img[src]")?.getAttribute("src")]
-            .map((value) => (value ? new URL(value, window.location.origin).toString() : ""))
-            .filter(Boolean),
-        ),
-      );
-
-      const text = normalize(
-        [
-          normalize(titleLink.textContent),
-          stockNumber ? `Stock #: ${stockNumber}` : "",
-          saleDoc ? `Title/Sale Doc: ${saleDoc}` : "",
-          primaryDamage ? `Primary Damage: ${primaryDamage}` : "",
-          secondaryDamage ? `Secondary Damage: ${secondaryDamage}` : "",
-          lossType ? `Loss: ${lossType}` : "",
-          odometer ? `Odometer: ${odometer}` : "",
-          startCode ? `Start Code: ${startCode}` : "",
-          airbags ? `Airbags: ${airbags}` : "",
-          keyState ? `Key: ${keyState}` : "",
-          engine ? `Engine: ${engine}` : "",
-          fuelType ? `Fuel Type: ${fuelType}` : "",
-          transmission ? `Transmission: ${transmission}` : "",
-          driveline ? `Driveline Type: ${driveline}` : "",
-          vin ? `VIN:${vin}` : "",
-          branch ? `Branch: ${branch}` : "",
-          vehicleLocation ? `Location: ${vehicleLocation}` : "",
-          market ? `Market: ${market}` : "",
-          acv ? `ACV: ${acv}` : "",
-          auctionDate ? `Auction: ${auctionDate}` : "",
-          ...actionTexts,
-        ]
-          .filter(Boolean)
-          .join(" "),
-      );
-      if (!text) {
-        continue;
-      }
-      candidates.push({ text, url, imageCandidates });
-    }
-
     return {
       title,
       bodyPreview: bodyText.slice(0, 500),
       failure,
-      noResults:
-        lower.includes("no items found for the search criteria specified") ||
-        (!!searchHistory && resultCount === 0 && candidates.length === 0),
-      currentPage,
-      totalPages,
-      resultCount,
-      candidates,
+      noResults: lower.includes("no items found for the search criteria specified") || (!!searchHistory && resultCount === 0),
+      ready:
+        (!!searchHistory || !!currentPageInput) &&
+        pageSize > 0 &&
+        (!!document.querySelector("#GBPSearchQuery") || !!document.querySelector("#Searches")),
     };
   });
 }
 
-async function waitForIaaiSearchSnapshot(page: Page, expectedPage: number, timeoutMs = 20000): Promise<IaaiSearchSnapshot> {
+async function waitForIaaiBootstrap(page: Page, timeoutMs = 20000): Promise<IaaiBootstrapState> {
   const startedAt = Date.now();
-  let snapshot = await readIaaiSearchSnapshot(page);
+  let snapshot = await readIaaiBootstrapState(page);
   while (Date.now() - startedAt < timeoutMs) {
     if (snapshot.failure) {
       return snapshot;
     }
-    if (snapshot.currentPage === expectedPage && (snapshot.noResults || snapshot.candidates.length > 0)) {
+    if (snapshot.ready || snapshot.noResults) {
       return snapshot;
     }
     await page.waitForTimeout(500);
-    snapshot = await readIaaiSearchSnapshot(page);
+    snapshot = await readIaaiBootstrapState(page);
   }
   return snapshot;
 }
@@ -930,7 +852,35 @@ async function fetchIaaiDirectMatches(page: Page, target: VinTarget, nowIso: str
   for (let year = target.yearFrom; year <= target.yearTo; year += 1) {
     const searchUrl = buildIaaiSearchUrl(target, year);
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-    let snapshot = await waitForIaaiSearchSnapshot(page, 1);
+    const bootstrap = await waitForIaaiBootstrap(page);
+    if (bootstrap.failure === "access-denied") {
+      throw new Error(`IAAI search access denied for ${target.key} ${year}`);
+    }
+    if (bootstrap.failure === "blocked") {
+      throw new Error(`IAAI search request blocked for ${target.key} ${year}`);
+    }
+    if (bootstrap.noResults) {
+      continue;
+    }
+
+    let snapshot: IaaiSearchSnapshot | null = null;
+    try {
+      const firstPageHtml = await fetchIaaiSearchPageHtmlFromInternalApi(page, 1);
+      snapshot = await readIaaiSearchSnapshotFromHtml(page, firstPageHtml, 1);
+    } catch {
+      snapshot = null;
+    }
+
+    if (!snapshot || (!snapshot.failure && !snapshot.noResults && snapshot.candidates.length === 0)) {
+      const fallbackHtml = await page.content().catch(() => "");
+      if (fallbackHtml) {
+        snapshot = await readIaaiSearchSnapshotFromHtml(page, fallbackHtml, 1);
+      }
+    }
+
+    if (!snapshot) {
+      throw new Error(`IAAI search bootstrap produced no usable page data for ${target.key} ${year}`);
+    }
     if (snapshot.failure === "access-denied") {
       throw new Error(`IAAI search access denied for ${target.key} ${year}`);
     }
@@ -1541,6 +1491,40 @@ function buildCopartImageVariants(rawUrl: string): string[] {
   return [...variants];
 }
 
+function buildIaaiImageVariants(rawUrl: string): string[] {
+  const variants = new Set<string>();
+  try {
+    const parsed = new URL(rawUrl);
+    if (!/vis\.iaai\.com$/i.test(parsed.hostname) || !/\/resizer$/i.test(parsed.pathname)) {
+      return [];
+    }
+    const imageKeys = parsed.searchParams.get("imageKeys");
+    if (!imageKeys) {
+      return [];
+    }
+    const baseKeys = imageKeys.replace(/~RW\d+~H\d+~TH\d+/gi, "");
+
+    const original = new URL(parsed.toString());
+    original.searchParams.delete("width");
+    original.searchParams.delete("height");
+    original.searchParams.delete("w");
+    original.searchParams.delete("h");
+    variants.add(original.toString());
+
+    const explicitLarge = new URL(original.toString());
+    explicitLarge.searchParams.set("width", "2576");
+    explicitLarge.searchParams.set("height", "1932");
+    variants.add(explicitLarge.toString());
+
+    const keySized = new URL(original.toString());
+    keySized.searchParams.set("imageKeys", `${baseKeys}~RW2576~H1932~TH0`);
+    variants.add(keySized.toString());
+  } catch {
+    return [];
+  }
+  return [...variants];
+}
+
 function stripCloudflareImageResize(url: string): string | null {
   const match = url.match(/\/cdn-cgi\/image\/[^/]+\/(https?:\/\/.+)$/i);
   return match ? match[1] : null;
@@ -1592,6 +1576,12 @@ function buildImageCandidateVariants(rawUrl: string, baseUrl: string): string[] 
     for (const copartVariant of buildCopartImageVariants(current)) {
       if (!variants.has(copartVariant)) {
         queue.push(copartVariant);
+      }
+    }
+
+    for (const iaaiVariant of buildIaaiImageVariants(current)) {
+      if (!variants.has(iaaiVariant)) {
+        queue.push(iaaiVariant);
       }
     }
   }
