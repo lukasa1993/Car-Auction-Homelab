@@ -2,6 +2,7 @@ import * as React from "react";
 import { renderToString } from "react-dom/server";
 
 import { forwardSetCookieHeaders } from "../lib/auth";
+import { buildDateRenderConfig } from "./date-render";
 import { AppShell } from "../ui/app-shell";
 import { AppDocument } from "../ui/document";
 import { renderAppPage, type AppPage } from "../ui/page-registry";
@@ -27,10 +28,15 @@ export function redirect(location: string, status = 302): Response {
   });
 }
 
-export function renderPage(title: string, page: AppPage): Response {
+export function renderPage(title: string, page: Omit<AppPage, "dateRender">, request: Request): Response {
+  const fullPage = {
+    ...page,
+    dateRender: buildDateRenderConfig(request),
+  } as AppPage;
+
   return new Response(`<!doctype html>${renderToString(
-    <AppDocument page={page} title={title}>
-      <AppShell>{renderAppPage(page)}</AppShell>
+    <AppDocument page={fullPage} title={title}>
+      <AppShell>{renderAppPage(fullPage)}</AppShell>
     </AppDocument>,
   )}`, {
     headers: {

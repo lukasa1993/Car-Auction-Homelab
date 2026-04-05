@@ -43,6 +43,7 @@ export async function handleEntityPages(
           detail,
         },
       },
+      request,
     );
   }
 

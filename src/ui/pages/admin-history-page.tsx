@@ -8,7 +8,8 @@ import { Button } from "../components/button";
 import { CopyTextButton } from "../components/copy-text-button";
 import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
-import { formatTimestamp, stripTeslaPrefix } from "../format";
+import { LocalizedDateText, useDateNowMs } from "../date-render";
+import { stripTeslaPrefix } from "../format";
 
 type FilterKey = "all" | "removed" | "approved";
 
@@ -125,12 +126,7 @@ function RowActions({ lot }: { lot: LotListItem }) {
 export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
   const [filter, setFilter] = React.useState<FilterKey>("all");
   const [query, setQuery] = React.useState("");
-  const [nowMs, setNowMs] = React.useState(() => Date.now());
-
-  React.useEffect(() => {
-    const timer = window.setInterval(() => setNowMs(Date.now()), 60000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const nowMs = useDateNowMs(60000);
 
   const sorted = React.useMemo(() => sortHistory(lots), [lots]);
 
@@ -284,7 +280,7 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
                       <TableCell className="hidden md:table-cell">
                         {ts ? (
                           <div className="flex flex-col gap-0.5">
-                            <span className="text-xs text-foreground">{formatTimestamp(ts)}</span>
+                            <span className="text-xs text-foreground"><LocalizedDateText format="timestamp" iso={ts} /></span>
                             <span className="text-[11px] text-muted-foreground">
                               {relativeFromNow(ts, nowMs)}
                             </span>

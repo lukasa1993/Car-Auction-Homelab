@@ -1,3 +1,5 @@
+import type { UserDateHints } from "../lib/date-render";
+
 export function hasExactAuctionTime(auctionDate: string | null | undefined): boolean {
   return typeof auctionDate === "string" && auctionDate.includes("T");
 }
@@ -32,8 +34,14 @@ export function formatAuctionCountdown(auctionDate: string | null | undefined, n
   return `${minutes}m ${seconds}s`;
 }
 
-export function formatLocalAuctionTime(auctionDate: string | null | undefined): string | null {
+export function formatLocalAuctionTime(
+  auctionDate: string | null | undefined,
+  hints?: UserDateHints | null,
+): string | null {
   if (typeof auctionDate !== "string" || !auctionDate.includes("T")) {
+    return null;
+  }
+  if (!hints?.timeZone) {
     return null;
   }
 
@@ -42,9 +50,10 @@ export function formatLocalAuctionTime(auctionDate: string | null | undefined): 
     return null;
   }
 
-  return `${new Intl.DateTimeFormat(undefined, {
+  return `${new Intl.DateTimeFormat(hints.locale || undefined, {
     hour: "numeric",
     minute: "2-digit",
+    timeZone: hints.timeZone,
     timeZoneName: "short",
   }).format(target)} local`;
 }
@@ -85,13 +94,27 @@ export function formatRelativeTimestamp(iso: string | null | undefined, nowMs: n
   return `${Math.floor(minutes / 1440)}d ago`;
 }
 
-export function formatTimestamp(iso: string | null | undefined): string {
-  if (!iso) return "—";
+export function formatTimestampFallback(iso: string | null | undefined, emptyLabel = "—"): string {
+  if (!iso) return emptyLabel;
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  return new Intl.DateTimeFormat(undefined, {
+  return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+export function formatTimestamp(
+  iso: string | null | undefined,
+  hints?: UserDateHints | null,
+  emptyLabel = "—",
+): string {
+  const fallback = formatTimestampFallback(iso, emptyLabel);
+  if (!iso) return fallback;
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return fallback;
+  if (!hints?.timeZone) return fallback;
+  return new Intl.DateTimeFormat(hints.locale || undefined, {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: hints.timeZone,
   }).format(new Date(ms));
 }
 

@@ -6,11 +6,11 @@ import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
 import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
+import { LocalizedDateText, useDateNowMs } from "../date-render";
 import {
   formatAuctionCountdown,
   formatAuctionDateDisplay,
   formatRelativeTimestamp,
-  formatLocalAuctionTime,
   hasExactAuctionTime,
   stripTeslaPrefix,
 } from "../format";
@@ -24,7 +24,6 @@ export interface MainPageProps {
   lots: LotListItem[];
   allLots: LotListItem[];
   lastCollectorIngestAt: string | null;
-  renderedAt: string;
   activeTab: string;
   tabs: MainPageTab[];
   auth: { signedIn: boolean; admin: boolean; email: string | null };
@@ -270,23 +269,13 @@ export function MainPage({
   lots,
   allLots,
   lastCollectorIngestAt,
-  renderedAt,
   activeTab,
   tabs,
   auth,
 }: MainPageProps) {
   const [allLotsState, setAllLotsState] = React.useState(allLots);
   const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
-  const [nowMs, setNowMs] = React.useState(() => Date.parse(renderedAt) || Date.now());
-
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
+  const nowMs = useDateNowMs(1000);
 
   const handleRejected = React.useCallback((lotId: string) => {
     setAllLotsState((current) => current.filter((lot) => lot.id !== lotId));
@@ -410,7 +399,14 @@ export function MainPage({
                     <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
                     <TableCell className="hidden sm:table-cell">
                       <div className="text-sm">{formatAuctionDateDisplay(lot)}</div>
-                      {hasExactAuctionTime(lot.auctionDate) ? <div className="mt-0.5 text-[11px] text-muted-foreground">{formatLocalAuctionTime(lot.auctionDate)}</div> : null}
+                      {hasExactAuctionTime(lot.auctionDate) ? (
+                        <LocalizedDateText
+                          className="mt-0.5 block text-[11px] text-muted-foreground empty:hidden"
+                          emptyLabel=""
+                          format="auction-local-time"
+                          iso={lot.auctionDate}
+                        />
+                      ) : null}
                     </TableCell>
                     <TableCell className="col-start-2 row-start-2 p-0 text-[15px] font-semibold leading-snug sm:p-3 sm:text-sm sm:font-normal">{stripTeslaPrefix(lot.carType)}</TableCell>
                     <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>

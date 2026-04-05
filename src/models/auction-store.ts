@@ -82,6 +82,32 @@ function normalizeLotStatus(status: string | null | undefined): LotRow["status"]
   }
 }
 
+function normalizedTextOrNull(value: string | null | undefined): string | null {
+  const normalized = normalizeWhitespace(value);
+  return normalized || null;
+}
+
+function preferredText(next: string | null | undefined, fallback: string | null | undefined): string | null {
+  return normalizedTextOrNull(next) ?? normalizedTextOrNull(fallback);
+}
+
+function preferredNumber(next: number | null | undefined, fallback: number | null | undefined): number | null {
+  return next == null ? fallback ?? null : Number(next);
+}
+
+function shouldPreserveKnownLotStatus(nextStatus: LotRow["status"], currentStatus: LotRow["status"]): boolean {
+  return nextStatus === "unknown" && (currentStatus === "upcoming" || currentStatus === "done");
+}
+
+function hasProtectedImageDimensions(width: number | null | undefined, height: number | null | undefined): boolean {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return false;
+  }
+  const longEdge = Math.max(Number(width), Number(height));
+  const shortEdge = Math.min(Number(width), Number(height));
+  return longEdge >= 1024 && shortEdge >= 720;
+}
+
 function normalizeWorkflowState(status: string | null | undefined): WorkflowState {
   switch ((status ?? "").toLowerCase()) {
     case "approved":
@@ -798,6 +824,14 @@ export class AuctionStore {
       return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(existingImage.id) as Record<string, unknown>);
     }
 
+    if (
+      existingImage &&
+      hasProtectedImageDimensions(existingImage.width, existingImage.height) &&
+      !hasProtectedImageDimensions(input.width ?? null, input.height ?? null)
+    ) {
+      return existingImage;
+    }
+
     if (existingImage) {
       this.db.query("DELETE FROM lot_images WHERE id = ?").run(existingImage.id);
       this.removeStoredImageFile(existingImage.storagePath);
@@ -898,11 +932,24 @@ export class AuctionStore {
       .query("SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1")
       .get(record.sourceKey, record.lotNumber) as Record<string, unknown> | null;
     const resolvedTarget = this.getResolvedTargetMetadata(record.targetKey);
-    const resolvedCarType = resolvedTarget?.carType || record.carType;
-    const resolvedMarker = resolvedTarget?.marker || record.marker;
-
     const nextStatus = normalizeLotStatus(record.status);
     if (existing) {
+      const current = mapLotRow(existing);
+      const mergedStatus = shouldPreserveKnownLotStatus(nextStatus, current.status) ? current.status : nextStatus;
+      const mergedSourceLabel = preferredText(record.sourceLabel, current.sourceLabel) || normalizeSourceLabel(record.sourceKey);
+      const mergedTargetKey = preferredText(record.targetKey, current.targetKey);
+      const mergedSourceDetailId = preferredText(record.sourceDetailId, current.sourceDetailId);
+      const mergedCarType = preferredText(resolvedTarget?.carType || record.carType, current.carType) || current.carType;
+      const mergedMarker = preferredText(resolvedTarget?.marker || record.marker, current.marker) || current.marker;
+      const mergedVinPattern = preferredText(record.vinPattern, current.vinPattern);
+      const mergedVin = preferredText(record.vin, current.vin);
+      const mergedModelYear = preferredNumber(record.modelYear, current.modelYear);
+      const mergedYearPage = preferredNumber(record.yearPage, current.yearPage);
+      const mergedAuctionDate = preferredText(record.auctionDate, current.auctionDate);
+      const mergedAuctionDateRaw = preferredText(record.auctionDateRaw, current.auctionDateRaw);
+      const mergedLocation = preferredText(record.location, current.location);
+      const mergedUrl = preferredText(record.url, current.url) || current.url;
+      const mergedEvidence = preferredText(record.evidence, current.evidence);
       this.db.query(`
         UPDATE lots
         SET
@@ -930,31 +977,34 @@ export class AuctionStore {
           updated_at = ?
         WHERE id = ?
       `).run(
-        record.sourceLabel || normalizeSourceLabel(record.sourceKey),
-        record.targetKey || null,
-        record.sourceDetailId ?? null,
-        resolvedCarType,
-        resolvedMarker,
-        record.vinPattern || null,
-        record.vin || null,
-        record.modelYear ?? null,
-        record.yearPage ?? null,
-        nextStatus,
-        record.auctionDate || null,
-        record.auctionDateRaw || null,
-        record.location || null,
-        record.url,
-        record.evidence || null,
+        mergedSourceLabel,
+        mergedTargetKey,
+        mergedSourceDetailId,
+        mergedCarType,
+        mergedMarker,
+        mergedVinPattern,
+        mergedVin,
+        mergedModelYear,
+        mergedYearPage,
+        mergedStatus,
+        mergedAuctionDate,
+        mergedAuctionDateRaw,
+        mergedLocation,
+        mergedUrl,
+        mergedEvidence,
         observedAt,
         observedAt,
         runId,
-        nextStatus,
+        mergedStatus,
         observedAt,
-        String(existing.id),
+        current.id,
       );
-      this.insertSnapshot(String(existing.id), runId, observedAt, true, record);
+      this.insertSnapshot(current.id, runId, observedAt, true, record);
       return;
     }
+
+    const resolvedCarType = preferredText(resolvedTarget?.carType || record.carType, null) || normalizeWhitespace(record.carType);
+    const resolvedMarker = preferredText(resolvedTarget?.marker || record.marker, null) || normalizeWhitespace(record.marker);
 
     const id = randomUUID();
     this.db.query(`
@@ -968,22 +1018,22 @@ export class AuctionStore {
     `).run(
       id,
       record.sourceKey,
-      record.sourceLabel || normalizeSourceLabel(record.sourceKey),
-      record.targetKey || null,
+      preferredText(record.sourceLabel, null) || normalizeSourceLabel(record.sourceKey),
+      preferredText(record.targetKey, null),
       record.lotNumber,
-      record.sourceDetailId ?? null,
+      preferredText(record.sourceDetailId, null),
       resolvedCarType,
       resolvedMarker,
-      record.vinPattern || null,
-      record.vin || null,
-      record.modelYear ?? null,
-      record.yearPage ?? null,
+      preferredText(record.vinPattern, null),
+      preferredText(record.vin, null),
+      preferredNumber(record.modelYear, null),
+      preferredNumber(record.yearPage, null),
       nextStatus,
-      record.auctionDate || null,
-      record.auctionDateRaw || null,
-      record.location || null,
-      record.url,
-      record.evidence || null,
+      preferredText(record.auctionDate, null),
+      preferredText(record.auctionDateRaw, null),
+      preferredText(record.location, null),
+      preferredText(record.url, null) || "",
+      preferredText(record.evidence, null),
       observedAt,
       observedAt,
       observedAt,
@@ -1012,6 +1062,7 @@ export class AuctionStore {
       .query("SELECT * FROM lots WHERE source_key = ? AND target_key = ?")
       .all(scope.sourceKey, scope.targetKey) as Record<string, unknown>[];
     let missingMarked = 0;
+    const scopeReportedZeroLots = presentLotNumbers.size === 0;
 
     for (const row of existingRows) {
       const lot = mapLotRow(row);
@@ -1019,10 +1070,13 @@ export class AuctionStore {
         continue;
       }
       const nextMissingCount = lot.missingCount + 1;
+      const shouldGraceSingleEmptyScopeRun = scopeReportedZeroLots && lot.status !== "done" && nextMissingCount === 1;
       const nextStatus =
         lot.status === "done"
           ? "done"
-          : nextMissingCount >= 2
+          : shouldGraceSingleEmptyScopeRun
+            ? lot.status
+            : nextMissingCount >= (scopeReportedZeroLots ? 3 : 2)
             ? "canceled"
             : "missing";
       this.db.query(`

@@ -5,11 +5,10 @@ import type { LotDetail, LotImageRow } from "../../lib/types";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { CopyTextButton } from "../components/copy-text-button";
+import { LocalizedDateText, useDateNowMs } from "../date-render";
 import {
   formatAuctionCountdown,
   formatBytes,
-  formatLocalAuctionTime,
-  formatTimestamp,
   hasExactAuctionTime,
   stripTeslaPrefix,
 } from "../format";
@@ -125,20 +124,10 @@ function Mono({ children }: { children: React.ReactNode }) {
 }
 
 function Countdown({ auctionDate }: { auctionDate: string }) {
-  const [nowMs, setNowMs] = React.useState(() => Date.now());
-
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
+  const nowMs = useDateNowMs(1000);
 
   const countdown = formatAuctionCountdown(auctionDate, nowMs);
   if (!countdown) return null;
-  const local = formatLocalAuctionTime(auctionDate);
 
   return (
     <div className="rounded-2xl bg-[color:var(--soon-bg)] px-4 py-3 ring-1 ring-[color:var(--soon-border)]">
@@ -148,9 +137,12 @@ function Countdown({ auctionDate }: { auctionDate: string }) {
       <div className="mt-1 font-display text-2xl font-semibold tabular-nums tracking-tight">
         {countdown}
       </div>
-      {local ? (
-        <div className="mt-0.5 text-[11px] text-muted-foreground">{local}</div>
-      ) : null}
+      <LocalizedDateText
+        className="mt-0.5 block text-[11px] text-muted-foreground empty:hidden"
+        emptyLabel=""
+        format="auction-local-time"
+        iso={auctionDate}
+      />
     </div>
   );
 }
@@ -279,13 +271,13 @@ export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
               {lot.auctionDateRaw ? (
                 <FactRow label="Auction">{lot.auctionDateRaw}</FactRow>
               ) : null}
-              <FactRow label="First seen">{formatTimestamp(lot.firstSeenAt)}</FactRow>
-              <FactRow label="Last seen">{formatTimestamp(lot.lastSeenAt)}</FactRow>
+              <FactRow label="First seen"><LocalizedDateText format="timestamp" iso={lot.firstSeenAt} /></FactRow>
+              <FactRow label="Last seen"><LocalizedDateText format="timestamp" iso={lot.lastSeenAt} /></FactRow>
               {lot.missingSince ? (
-                <FactRow label="Missing since">{formatTimestamp(lot.missingSince)}</FactRow>
+                <FactRow label="Missing since"><LocalizedDateText format="timestamp" iso={lot.missingSince} /></FactRow>
               ) : null}
               {lot.canceledAt ? (
-                <FactRow label="Canceled">{formatTimestamp(lot.canceledAt)}</FactRow>
+                <FactRow label="Canceled"><LocalizedDateText format="timestamp" iso={lot.canceledAt} /></FactRow>
               ) : null}
             </dl>
 

@@ -35,6 +35,7 @@ function resolveTab(raw: string | null, availableTabs: Array<{ key: string }>): 
 }
 
 export function handlePublicPages(
+  request: Request,
   pathname: string,
   url: URL,
   authState: AuthState,
@@ -71,12 +72,12 @@ export function handlePublicPages(
         },
         lastCollectorIngestAt: services.store.getLatestCollectorIngestAt(),
         lots: filteredLots,
-        renderedAt: new Date().toISOString(),
         tabs: modelTabs.map((tab) => ({
           key: tab.key,
           label: tab.label,
         })),
       },
     },
+    request,
   );
 }

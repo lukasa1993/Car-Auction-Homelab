@@ -23,6 +23,7 @@ export async function handleAdminPages(
           error: url.searchParams.get("error"),
         },
       },
+      request,
     );
   }
 
@@ -45,6 +46,7 @@ export async function handleAdminPages(
           targets: services.store.getVinTargets(),
         },
       },
+      request,
     );
   }
 
@@ -56,13 +58,17 @@ export async function handleAdminPages(
       return redirect("/admin/login?error=Admin%20access%20required");
     }
     const moderatedLots = services.store.getLotList(true).filter((lot) => lot.workflowState !== "new");
-    return renderPage("Admin History", {
-      kind: "admin-history",
-      props: {
-        email: authState.email,
-        lots: moderatedLots,
+    return renderPage(
+      "Admin History",
+      {
+        kind: "admin-history",
+        props: {
+          email: authState.email,
+          lots: moderatedLots,
+        },
       },
-    });
+      request,
+    );
   }
 
   if (pathname === "/admin/login" && request.method === "POST") {

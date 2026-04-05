@@ -39,7 +39,7 @@ export async function handleRequest(request: Request, services: ServerServices):
     });
   }
 
-  const publicPageResponse = handlePublicPages(pathname, url, authState, services);
+  const publicPageResponse = handlePublicPages(request, pathname, url, authState, services);
   if (publicPageResponse) {
     return publicPageResponse;
   }
