@@ -1,9 +1,9 @@
 import * as React from "react";
+import { Check, Copy, ExternalLink, X } from "lucide-react";
 
 import type { LotListItem } from "../../lib/types";
 import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
-import { CopyTextButton } from "../components/copy-text-button";
 import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
 import {
@@ -42,8 +42,35 @@ function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
   return diff > 0 && diff <= 12 * 60 * 60 * 1000;
 }
 
+function countdownUrgency(
+  auctionDate: string | null | undefined,
+  nowMs: number,
+): "live" | "imminent" | null {
+  if (!auctionDate || !hasExactAuctionTime(auctionDate)) {
+    return null;
+  }
+  const target = Date.parse(auctionDate);
+  if (Number.isNaN(target)) {
+    return null;
+  }
+  const diff = target - nowMs;
+  if (diff <= 0) {
+    return "live";
+  }
+  if (diff <= 60 * 60 * 1000) {
+    return "imminent";
+  }
+  return null;
+}
+
 function ImageCell({ lot }: { lot: LotListItem }) {
-  return <LotImagePreview lot={lot} />;
+  return (
+    <LotImagePreview
+      lot={lot}
+      thumbClassName="h-20 w-28 rounded-2xl sm:h-11 sm:w-16 sm:rounded-xl"
+      placeholderClassName="h-20 w-28 rounded-2xl text-[11px] sm:h-11 sm:w-16 sm:rounded-xl sm:text-[10px]"
+    />
+  );
 }
 
 function LotSourceCell({ lot }: { lot: LotListItem }) {
@@ -126,15 +153,83 @@ function RejectListingButton({
   }, [isPending, lot.id, onRejected]);
 
   return (
-    <form action={`/lots/${lot.id}/reject`} method="post" onSubmit={handleSubmit}>
+    <form
+      action={`/lots/${lot.id}/reject`}
+      className="contents"
+      method="post"
+      onSubmit={handleSubmit}
+    >
       <input name="redirect" type="hidden" value={redirectTo} />
-      <div className="flex flex-col items-end gap-1">
-        <Button disabled={isPending} size="sm" type="submit" variant="outline">
-          {isPending ? "Rejecting..." : "Reject"}
-        </Button>
-        {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
-      </div>
+      <Button
+        aria-label={isPending ? "Rejecting" : "Reject listing"}
+        className="h-10 w-10 shrink-0 rounded-2xl p-0 text-muted-foreground hover:text-destructive sm:h-8 sm:w-auto sm:rounded-4xl sm:px-3"
+        disabled={isPending}
+        size="sm"
+        title={error ?? "Reject"}
+        type="submit"
+        variant="outline"
+      >
+        <X className="h-4 w-4 sm:hidden" />
+        <span className="hidden sm:inline">{isPending ? "Rejecting..." : "Reject"}</span>
+      </Button>
     </form>
+  );
+}
+
+function CopyLotButton({ lot }: { lot: LotListItem }) {
+  const [copied, setCopied] = React.useState(false);
+  const resetTimer = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(lot.lotNumber);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = lot.lotNumber;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setCopied(true);
+    } catch {
+      return;
+    }
+
+    if (resetTimer.current) {
+      window.clearTimeout(resetTimer.current);
+    }
+    resetTimer.current = window.setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <Button
+      aria-label={copied ? "Copied lot number" : "Copy lot number"}
+      className="h-10 w-10 shrink-0 rounded-2xl p-0 sm:h-8 sm:w-auto sm:rounded-4xl sm:px-3"
+      onClick={handleCopy}
+      size="sm"
+      title={`Copy ${lot.lotNumber}`}
+      type="button"
+      variant="outline"
+    >
+      {copied ? (
+        <Check className="h-4 w-4 sm:hidden" />
+      ) : (
+        <Copy className="h-4 w-4 sm:hidden" />
+      )}
+      <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
+    </Button>
   );
 }
 
@@ -148,11 +243,24 @@ function LotRowActions({
   redirectTo: string;
 }) {
   return (
-    <div className="flex flex-wrap justify-end gap-2">
-      <a href={lot.url} rel="noreferrer" target="_blank">
-        <Button size="sm" variant="outline">Open</Button>
+    <div className="flex items-center justify-end gap-2">
+      <a
+        className="flex-1 sm:flex-initial"
+        href={lot.url}
+        rel="noreferrer"
+        target="_blank"
+      >
+        <Button
+          className="h-10 w-full gap-1.5 rounded-2xl bg-foreground text-background shadow-sm hover:bg-foreground/90 sm:h-8 sm:w-auto sm:rounded-4xl sm:border sm:border-border sm:bg-background sm:text-foreground sm:shadow-none sm:hover:bg-accent sm:hover:text-accent-foreground"
+          size="sm"
+          variant="default"
+        >
+          <span className="sm:hidden">Open auction</span>
+          <span className="hidden sm:inline">Open</span>
+          <ExternalLink className="h-3.5 w-3.5 sm:hidden" />
+        </Button>
       </a>
-      <CopyTextButton value={lot.lotNumber} />
+      <CopyLotButton lot={lot} />
       <RejectListingButton lot={lot} onRejected={onRejected} redirectTo={redirectTo} />
     </div>
   );
@@ -226,17 +334,25 @@ export function MainPage({
                 <TableBody className="block sm:table-row-group">
                   {soonLots.map((lot) => (
                     <TableRow
-                      className="grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-1 px-3 py-3 hover:bg-transparent sm:table-row sm:gap-0 sm:p-0 sm:hover:bg-muted/50"
+                      className="grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-0.5 px-3 py-4 hover:bg-transparent sm:table-row sm:gap-0 sm:p-0 sm:hover:bg-muted/50"
                       key={`${lot.sourceKey}:${lot.lotNumber}`}
                     >
                       <TableCell className="col-start-2 row-start-1 p-0 sm:p-3">
-                        <span className="whitespace-nowrap text-sm font-medium sm:font-normal">{formatAuctionCountdown(lot.auctionDate, nowMs) || "Time TBD"}</span>
+                        <span
+                          className={`whitespace-nowrap text-base font-semibold leading-tight tabular-nums sm:text-sm sm:font-normal ${
+                            countdownUrgency(lot.auctionDate, nowMs)
+                              ? "text-destructive"
+                              : "text-foreground"
+                          }`}
+                        >
+                          {formatAuctionCountdown(lot.auctionDate, nowMs) || "Time TBD"}
+                        </span>
                         {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
                       </TableCell>
                       <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
-                      <TableCell className="col-start-2 row-start-2 p-0 text-sm sm:p-3">{stripTeslaPrefix(lot.carType)}</TableCell>
+                      <TableCell className="col-start-2 row-start-2 p-0 text-[15px] font-semibold leading-snug sm:p-3 sm:text-sm sm:font-normal">{stripTeslaPrefix(lot.carType)}</TableCell>
                       <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
-                      <TableCell className="col-span-2 row-start-4 p-0 pt-2 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
+                      <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
                         <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                       </TableCell>
                     </TableRow>
@@ -275,12 +391,20 @@ export function MainPage({
                 {remainingLots.map((lot) => (
                   <TableRow
                     key={`${lot.sourceKey}:${lot.lotNumber}`}
-                    className={`grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-1 px-3 py-3 hover:bg-transparent sm:table-row sm:gap-0 sm:p-0 sm:hover:bg-muted/50${
+                    className={`grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-0.5 px-3 py-4 hover:bg-transparent sm:table-row sm:gap-0 sm:p-0 sm:hover:bg-muted/50${
                       lot.status === "done" ? " opacity-35" : ""
                     }`}
                   >
                     <TableCell className="col-start-2 row-start-1 p-0 sm:p-3">
-                      <span className="whitespace-nowrap text-sm font-medium sm:font-normal">{formatAuctionCountdown(lot.auctionDate, nowMs) || (lot.auctionDate ? "Time TBD" : "Date pending")}</span>
+                      <span
+                        className={`whitespace-nowrap text-base font-semibold leading-tight tabular-nums sm:text-sm sm:font-normal ${
+                          countdownUrgency(lot.auctionDate, nowMs)
+                            ? "text-destructive"
+                            : "text-foreground"
+                        }`}
+                      >
+                        {formatAuctionCountdown(lot.auctionDate, nowMs) || (lot.auctionDate ? "Time TBD" : "Date pending")}
+                      </span>
                       {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
                     </TableCell>
                     <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
@@ -288,9 +412,9 @@ export function MainPage({
                       <div className="text-sm">{formatAuctionDateDisplay(lot)}</div>
                       {hasExactAuctionTime(lot.auctionDate) ? <div className="mt-0.5 text-[11px] text-muted-foreground">{formatLocalAuctionTime(lot.auctionDate)}</div> : null}
                     </TableCell>
-                    <TableCell className="col-start-2 row-start-2 p-0 text-sm sm:p-3">{stripTeslaPrefix(lot.carType)}</TableCell>
+                    <TableCell className="col-start-2 row-start-2 p-0 text-[15px] font-semibold leading-snug sm:p-3 sm:text-sm sm:font-normal">{stripTeslaPrefix(lot.carType)}</TableCell>
                     <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
-                    <TableCell className="col-span-2 row-start-4 p-0 pt-2 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
+                    <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
                       <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                     </TableCell>
                   </TableRow>
