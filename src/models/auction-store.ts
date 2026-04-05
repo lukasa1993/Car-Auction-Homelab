@@ -15,6 +15,7 @@ import type {
   RunnerScope,
   ScrapedLotRecord,
   SourceKey,
+  TargetMetadataUpdatePayload,
   VinTarget,
   VinTargetMetadataUpdate,
   WorkflowState,
@@ -39,6 +40,10 @@ interface RunnerSummary {
   runId: string;
   upserted: number;
   missingMarked: number;
+}
+
+interface TargetMetadataUpdateSummary {
+  applied: number;
 }
 
 function boolFlag(value: boolean): number {
@@ -647,6 +652,21 @@ export class AuctionStore {
     `).run(randomUUID(), lotId, workflowState, actor, note, null, now);
   }
 
+  applyTargetMetadataUpdates(payload: TargetMetadataUpdatePayload): TargetMetadataUpdateSummary {
+    const observedAt = payload.observedAt || new Date().toISOString();
+    let applied = 0;
+
+    this.db.transaction(() => {
+      for (const update of payload.updates ?? []) {
+        if (this.applyTargetMetadataUpdate(update, observedAt)) {
+          applied += 1;
+        }
+      }
+    })();
+
+    return { applied };
+  }
+
   ingest(payload: IngestPayload): RunnerSummary {
     const runId = payload.run.id ?? randomUUID();
     const submittedAt = new Date().toISOString();
@@ -791,15 +811,15 @@ export class AuctionStore {
     return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(id) as Record<string, unknown>);
   }
 
-  private applyTargetMetadataUpdate(update: VinTargetMetadataUpdate, observedAt: string): void {
+  private applyTargetMetadataUpdate(update: VinTargetMetadataUpdate, observedAt: string): boolean {
     if (!update.targetKey) {
-      return;
+      return false;
     }
     const existingRow = this.db
       .query("SELECT * FROM vin_targets WHERE key = ? LIMIT 1")
       .get(update.targetKey) as Record<string, unknown> | null;
     if (!existingRow) {
-      return;
+      return false;
     }
     const existing = mapVinTarget(existingRow);
     const nextLabel = update.label?.trim();
@@ -811,10 +831,10 @@ export class AuctionStore {
     const shouldReplaceYears = hasGenericVinTargetYearRange(existing) && nextYearFrom != null && nextYearTo != null;
 
     if (!shouldReplaceMetadata && !shouldReplaceYears) {
-      return;
+      return false;
     }
 
-    this.db.query(`
+    const result = this.db.query(`
       UPDATE vin_targets
       SET
         label = ?,
@@ -835,6 +855,7 @@ export class AuctionStore {
       observedAt,
       existing.id,
     );
+    return Number(result.changes ?? 0) > 0;
   }
 
   private getResolvedTargetMetadata(targetKey: string | null | undefined): Pick<VinTarget, "carType" | "marker"> | null {

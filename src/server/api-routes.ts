@@ -1,5 +1,5 @@
 import type { AuthState, ServerServices } from "./context";
-import type { IngestPayload, SourceKey } from "../lib/types";
+import type { IngestPayload, SourceKey, TargetMetadataUpdatePayload } from "../lib/types";
 import { parseBoolean } from "../lib/utils";
 import { badRequestResponse, unauthorizedResponse } from "./responses";
 import { requireBearer } from "../lib/auth";
@@ -49,6 +49,17 @@ export async function handleApiRoutes(
       },
     });
     return Response.json(result);
+  }
+
+  if (pathname === "/api/ingest/target-updates" && request.method === "POST") {
+    if (!requireBearer(request, services.config.ingestToken)) {
+      return unauthorizedResponse();
+    }
+    const payload = await request.json() as TargetMetadataUpdatePayload;
+    if (!Array.isArray(payload?.updates)) {
+      return badRequestResponse("Malformed target update payload");
+    }
+    return Response.json(services.store.applyTargetMetadataUpdates(payload));
   }
 
   if (pathname === "/api/ingest/image-state" && request.method === "GET") {

@@ -72,6 +72,11 @@ export interface VinTargetMetadataUpdate {
   yearTo?: number | null;
 }
 
+export interface TargetMetadataUpdatePayload {
+  observedAt?: string;
+  updates: VinTargetMetadataUpdate[];
+}
+
 export interface IngestRunPayload {
   id?: string;
   runnerId: string;

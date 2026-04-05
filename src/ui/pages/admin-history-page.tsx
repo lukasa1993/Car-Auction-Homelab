@@ -37,6 +37,19 @@ function formatSourceLink(url: string): string {
   }
 }
 
+function HistoryRestoreButton({ lot }: { lot: LotListItem }) {
+  if (lot.workflowState !== "removed") {
+    return null;
+  }
+
+  return (
+    <form action={`/admin/lots/${lot.id}/restore`} method="post">
+      <input name="redirect" type="hidden" value="/admin/history" />
+      <Button size="sm" type="submit" variant="outline">Restore</Button>
+    </form>
+  );
+}
+
 function HistoryRowActions({ lot }: { lot: LotListItem }) {
   return (
     <div className="flex flex-wrap justify-end gap-2">
@@ -44,12 +57,6 @@ function HistoryRowActions({ lot }: { lot: LotListItem }) {
         <Button size="sm" variant="outline">Open</Button>
       </a>
       <CopyTextButton value={lot.lotNumber} />
-      {lot.workflowState === "removed" ? (
-        <form action={`/admin/lots/${lot.id}/restore`} method="post">
-          <input name="redirect" type="hidden" value="/admin/history" />
-          <Button size="sm" type="submit" variant="outline">Restore</Button>
-        </form>
-      ) : null}
     </div>
   );
 }
@@ -128,7 +135,7 @@ export function AdminHistoryPage({
                   <TableHead>Removed at</TableHead>
                   <TableHead>Location</TableHead>
                   <TableHead>Note</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
+                  <TableHead className="text-right">Links</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -143,6 +150,11 @@ export function AdminHistoryPage({
                           </a>
                           <div className="text-xs text-muted-foreground">Lot {lot.lotNumber}</div>
                           <div className="text-xs text-muted-foreground">{lot.sourceLabel}</div>
+                          {lot.workflowState === "removed" ? (
+                            <div className="pt-1">
+                              <HistoryRestoreButton lot={lot} />
+                            </div>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell>

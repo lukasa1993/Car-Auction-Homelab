@@ -623,6 +623,35 @@ function buildDiscoveredTargetUpdates(observations: TargetMetadataObservation[],
   });
 }
 
+function buildFastTargetMetadataUpdates(updates: VinTargetMetadataUpdate[]): VinTargetMetadataUpdate[] {
+  return updates.flatMap((update) => {
+    const next: VinTargetMetadataUpdate = { targetKey: update.targetKey };
+    if (update.label?.trim()) {
+      next.label = update.label.trim();
+    }
+    if (update.carType?.trim()) {
+      next.carType = update.carType.trim();
+    }
+    if (update.marker?.trim()) {
+      next.marker = update.marker.trim();
+    }
+    return next.label || next.carType || next.marker ? [next] : [];
+  });
+}
+
+function buildDeferredTargetRangeUpdates(updates: VinTargetMetadataUpdate[]): VinTargetMetadataUpdate[] {
+  return updates.flatMap((update) => {
+    const next: VinTargetMetadataUpdate = { targetKey: update.targetKey };
+    if (update.yearFrom != null) {
+      next.yearFrom = update.yearFrom;
+    }
+    if (update.yearTo != null) {
+      next.yearTo = update.yearTo;
+    }
+    return next.yearFrom != null || next.yearTo != null ? [next] : [];
+  });
+}
+
 function applyTargetUpdates(targets: VinTarget[], updates: VinTargetMetadataUpdate[]): VinTarget[] {
   const updatesByKey = new Map(updates.map((update) => [update.targetKey, update]));
   return targets.map((target) => {
@@ -2276,6 +2305,28 @@ async function postIngest(
   return await response.json() as { runId: string };
 }
 
+async function postTargetMetadataUpdates(
+  baseUrl: string,
+  token: string,
+  updates: VinTargetMetadataUpdate[],
+): Promise<{ applied: number }> {
+  const response = await fetch(`${baseUrl}/api/ingest/target-updates`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      observedAt: new Date().toISOString(),
+      updates,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Target update ingest failed with HTTP ${response.status}`);
+  }
+  return await response.json() as { applied: number };
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const ingestToken = process.env.AUCTION_INGEST_TOKEN;
@@ -2293,6 +2344,7 @@ async function main(): Promise<void> {
   const scopes: CoveredScope[] = [];
   const allRecords: ScrapedRecordWithImages[] = [];
   const allObservations: TargetMetadataObservation[] = [];
+  let fastTargetMetadataPosted = false;
 
   const sourceContexts: Partial<Record<SourceKey, BrowserContext>> = {};
   try {
@@ -2309,6 +2361,18 @@ async function main(): Promise<void> {
     }
 
     const copartTargetUpdates = buildDiscoveredTargetUpdates(allObservations, activeTargets);
+    const fastTargetMetadataUpdates = buildFastTargetMetadataUpdates(copartTargetUpdates);
+    if (fastTargetMetadataUpdates.length > 0) {
+      try {
+        const targetUpdateResult = await postTargetMetadataUpdates(args.baseUrl, ingestToken, fastTargetMetadataUpdates);
+        fastTargetMetadataPosted = true;
+        console.log(
+          `Applied ${targetUpdateResult.applied} VIN target update${targetUpdateResult.applied === 1 ? "" : "s"} before lot ingest.`,
+        );
+      } catch (error) {
+        console.warn(`VIN target fast update failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const iaaiTargets = applyTargetUpdates(activeTargets, copartTargetUpdates);
 
     if (sourceContexts.iaai) {
@@ -2321,8 +2385,18 @@ async function main(): Promise<void> {
       new Map(allRecords.map((item) => [`${item.record.sourceKey}|${item.record.lotNumber}`, item])).values(),
     );
     const targetUpdates = buildDiscoveredTargetUpdates(allObservations, activeTargets);
+    const ingestTargetUpdates = fastTargetMetadataPosted ? buildDeferredTargetRangeUpdates(targetUpdates) : targetUpdates;
     const completedAt = new Date().toISOString();
-    const ingestResult = await postIngest(args.baseUrl, ingestToken, scopes, dedupedRecords, targetUpdates, args, startedAt, completedAt);
+    const ingestResult = await postIngest(
+      args.baseUrl,
+      ingestToken,
+      scopes,
+      dedupedRecords,
+      ingestTargetUpdates,
+      args,
+      startedAt,
+      completedAt,
+    );
     console.log(`Ingested ${dedupedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);
 
     await Promise.all([

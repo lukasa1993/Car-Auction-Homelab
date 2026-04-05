@@ -29,85 +29,55 @@ function SourceFlag({
   );
 }
 
-function SummaryTile({
-  eyebrow,
-  value,
-  muted,
-}: {
-  eyebrow: string;
-  value: React.ReactNode;
-  muted?: string;
-}) {
-  return (
-    <div className="rounded-[24px] border border-border/70 bg-background/75 p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{eyebrow}</div>
-      <div className="mt-2 text-base font-semibold text-foreground">{value}</div>
-      {muted ? <div className="mt-1 text-sm text-muted-foreground">{muted}</div> : null}
-    </div>
-  );
-}
-
 function TargetCard({ target }: { target: VinTarget }) {
   const awaitingCollectorMetadata = isGenericVinTargetMetadata(target);
+  const subtitle = awaitingCollectorMetadata
+    ? `Year window ${formatYearWindow(target)}. Waiting for collector metadata.`
+    : `${target.carType} · ${formatYearWindow(target)}`;
 
   return (
     <form
       action={`/admin/targets/${target.id}`}
-      className="grid gap-4 rounded-[28px] border border-border/80 bg-card/90 p-5 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.28)]"
+      className="grid gap-4 rounded-[24px] border border-border/80 bg-card/90 p-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.28)] sm:p-5"
       method="post"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={target.active ? "success" : "muted"}>{target.active ? "Active" : "Paused"}</Badge>
             {target.enabledCopart ? <Badge variant="outline">Copart</Badge> : null}
             {target.enabledIaai ? <Badge variant="outline">IAAI</Badge> : null}
           </div>
-          <h2 className="mt-3 text-lg font-semibold tracking-tight">{target.label}</h2>
-          <p className="text-sm text-muted-foreground">{target.carType}</p>
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">
+              {awaitingCollectorMetadata ? "Pending metadata" : target.label}
+            </h2>
+            <p className="text-sm text-muted-foreground">{subtitle}</p>
+          </div>
         </div>
         <Button size="sm" type="submit" variant="outline">Save</Button>
       </div>
 
-      <div className="space-y-2">
-        <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" htmlFor={`vin-${target.id}`}>
-          VIN family mask
-        </label>
-        <Input
-          defaultValue={target.vinPattern}
-          id={`vin-${target.id}`}
-          name="vinPattern"
-          placeholder="1FTEW1E5XJK"
-          spellCheck={false}
-        />
-        <p className="text-sm text-muted-foreground">
-          Use <code>*</code> for the VIN wildcard. The collector searches from the prefix and resolves the
-          remaining serial digits automatically.
-        </p>
-      </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="space-y-2">
+          <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" htmlFor={`vin-${target.id}`}>
+            VIN family mask
+          </label>
+          <Input
+            defaultValue={target.vinPattern}
+            id={`vin-${target.id}`}
+            name="vinPattern"
+            placeholder="1FTEW1E5XJK"
+            spellCheck={false}
+          />
+          <p className="text-sm text-muted-foreground">Use <code>*</code> for wildcard characters.</p>
+        </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <SummaryTile
-          eyebrow="Prefix query"
-          muted="Used directly across source searches."
-          value={<code className="text-[13px]">{target.vinPrefix}</code>}
-        />
-        <SummaryTile
-          eyebrow="Metadata"
-          muted={`Year window ${formatYearWindow(target)}`}
-          value={awaitingCollectorMetadata ? "Pending collector discovery" : target.label}
-        />
-        <SummaryTile
-          eyebrow="Search mode"
-          muted={awaitingCollectorMetadata ? "Copart discovery first. IAAI stays off until collector-backed metadata exists." : "Collector-enriched from live auction matches."}
-          value={<code className="text-[13px]">{awaitingCollectorMetadata ? "Copart first" : "Collector-backed"}</code>}
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-4 rounded-[24px] border border-border/70 bg-muted/35 px-4 py-3">
-        <SourceFlag checked={target.enabledCopart} label="Copart" name="enabledCopart" />
-        <SourceFlag checked={target.enabledIaai} label="IAAI" name="enabledIaai" />
-        <SourceFlag checked={target.active} label="Target active" name="active" />
+        <div className="flex flex-wrap items-center gap-4 rounded-[20px] border border-border/70 bg-muted/35 px-4 py-3">
+          <SourceFlag checked={target.enabledCopart} label="Copart" name="enabledCopart" />
+          <SourceFlag checked={target.enabledIaai} label="IAAI" name="enabledIaai" />
+          <SourceFlag checked={target.active} label="Target active" name="active" />
+        </div>
       </div>
     </form>
   );
@@ -149,28 +119,11 @@ export function AdminPage({
           </div>
         ) : null}
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <Card className="border-none bg-transparent shadow-none ring-0">
-            <CardHeader className="px-0 pb-0">
-              <CardTitle className="text-3xl tracking-tight sm:text-4xl">Mask-first target setup.</CardTitle>
-              <CardDescription className="max-w-2xl text-base leading-7">
-                Enter masks or concrete prefixes like <code>7SAYGDEE*TF</code> or <code>1FTEW1E5XJK</code>.
-                Admin stores the prefix immediately. The collector resolves family metadata from Copart matches on the next sync.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 px-0 pt-5 sm:grid-cols-3">
-              <SummaryTile eyebrow="Total targets" value={targets.length} />
-              <SummaryTile eyebrow="Active" value={activeTargets} />
-              <SummaryTile eyebrow="Wildcard rule" value={<code className="text-[13px]">* = single VIN wildcard</code>} />
-            </CardContent>
-          </Card>
-
+        <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:items-start">
           <Card>
             <CardHeader>
               <CardTitle>Add target</CardTitle>
-              <CardDescription>
-                Add the VIN family mask or concrete prefix. Copart fills in label metadata after the collector sees matching lots.
-              </CardDescription>
+              <CardDescription>Enter a mask or concrete VIN prefix.</CardDescription>
             </CardHeader>
             <CardContent>
               <form action="/admin/targets" className="space-y-4" method="post">
@@ -179,9 +132,7 @@ export function AdminPage({
                     VIN family mask
                   </label>
                   <Input id="vinPattern" name="vinPattern" placeholder="1FTEW1E5XJK" required spellCheck={false} />
-                  <p className="text-sm text-muted-foreground">
-                    The trailing VIN serial stays implicit. The collector expands it when matching live lots.
-                  </p>
+                  <p className="text-sm text-muted-foreground">Use <code>*</code> for wildcard characters.</p>
                 </div>
                 <input name="enabledCopart" type="hidden" value="on" />
                 <input name="active" type="hidden" value="on" />
@@ -192,12 +143,28 @@ export function AdminPage({
               </form>
             </CardContent>
           </Card>
-        </section>
 
-        <section className="grid gap-4">
-          {targets.map((target) => (
-            <TargetCard key={target.id} target={target} />
-          ))}
+          <div className="grid gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight">Targets</h2>
+                <p className="text-sm text-muted-foreground">
+                  {targets.length} total · {activeTargets} active
+                </p>
+              </div>
+            </div>
+            {targets.length ? (
+              targets.map((target) => (
+                <TargetCard key={target.id} target={target} />
+              ))
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-sm text-muted-foreground">
+                  No targets yet.
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </section>
       </div>
     </main>

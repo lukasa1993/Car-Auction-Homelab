@@ -12,15 +12,20 @@ import {
   formatGeneratedAt,
   formatLocalAuctionTime,
   hasExactAuctionTime,
+  stripTeslaPrefix,
 } from "../format";
 
-type Tab = "model3" | "modely" | "all";
+export interface MainPageTab {
+  key: string;
+  label: string;
+}
 
 export interface MainPageProps {
   lots: LotListItem[];
   allLots: LotListItem[];
   generatedAt: string;
-  activeTab: Tab;
+  activeTab: string;
+  tabs: MainPageTab[];
 }
 
 function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
@@ -62,6 +67,11 @@ function TabLink({ href, active, children }: { href: string; active: boolean; ch
       {children}
     </a>
   );
+}
+
+function buildTabHref(tab: string): string {
+  const params = new URLSearchParams({ tab });
+  return `/?${params.toString()}`;
 }
 
 function RejectListingButton({
@@ -145,6 +155,7 @@ export function MainPage({
   allLots,
   generatedAt,
   activeTab,
+  tabs,
 }: MainPageProps) {
   const [allLotsState, setAllLotsState] = React.useState(allLots);
   const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
@@ -166,7 +177,7 @@ export function MainPage({
 
   const soonLots = allLotsState.filter((lot) => isStartingSoon(lot, nowMs));
   const remainingLots = visibleLotsState.filter((lot) => !isStartingSoon(lot, nowMs));
-  const redirectTo = `/?tab=${activeTab}`;
+  const redirectTo = buildTabHref(activeTab);
 
   return (
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
@@ -200,7 +211,7 @@ export function MainPage({
                         {lot.modelYear ? <span className="mt-0.5 block text-[11px] text-muted-foreground">MY {lot.modelYear}</span> : null}
                       </TableCell>
                       <TableCell><ImageCell lot={lot} /></TableCell>
-                      <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
+                      <TableCell className="text-sm">{stripTeslaPrefix(lot.carType)}</TableCell>
                       <TableCell><LotSourceCell lot={lot} /></TableCell>
                       <TableCell className="text-right">
                         <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
@@ -214,12 +225,15 @@ export function MainPage({
         ) : null}
 
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-4 pb-0">
+          <CardHeader className="flex-col items-start gap-3 pb-0 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-sm">Lots</CardTitle>
-            <div className="flex items-center gap-0.5 rounded-3xl bg-muted p-0.5">
-              <TabLink href="/?tab=model3" active={activeTab === "model3"}>Model 3</TabLink>
-              <TabLink href="/?tab=modely" active={activeTab === "modely"}>Model Y</TabLink>
-              <TabLink href="/?tab=all" active={activeTab === "all"}>All</TabLink>
+            <div className="flex flex-wrap items-center gap-0.5 rounded-3xl bg-muted p-0.5">
+              {tabs.map((tab) => (
+                <TabLink href={buildTabHref(tab.key)} active={activeTab === tab.key} key={tab.key}>
+                  {tab.label}
+                </TabLink>
+              ))}
+              <TabLink href={buildTabHref("all")} active={activeTab === "all"}>All</TabLink>
             </div>
           </CardHeader>
           <CardContent className="pt-2">
@@ -249,7 +263,7 @@ export function MainPage({
                       <div className="text-sm">{formatAuctionDateDisplay(lot)}</div>
                       {hasExactAuctionTime(lot.auctionDate) ? <div className="mt-0.5 text-[11px] text-muted-foreground">{formatLocalAuctionTime(lot.auctionDate)}</div> : null}
                     </TableCell>
-                    <TableCell className="text-sm">{lot.carType.replace("Tesla ", "")}</TableCell>
+                    <TableCell className="text-sm">{stripTeslaPrefix(lot.carType)}</TableCell>
                     <TableCell><LotSourceCell lot={lot} /></TableCell>
                     <TableCell className="text-right">
                       <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
