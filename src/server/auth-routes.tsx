@@ -22,7 +22,7 @@ export async function handleAuthPages(
   }
 
   if (pathname === "/login" || pathname === "/signup" || pathname === "/logout") {
-    return Response.redirect("/admin", 302);
+    return Response.redirect("/admin/login", 302);
   }
 
   return null;

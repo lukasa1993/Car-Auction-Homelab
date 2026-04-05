@@ -43,12 +43,13 @@ export async function authRedirectFromResponse(
   response: Response,
   successRedirect: string,
   failureRedirect: string,
+  redirectStatus = 303,
 ): Promise<Response> {
   if (response.ok) {
     const headers = new Headers();
     forwardSetCookieHeaders(response, headers);
     headers.set("location", successRedirect);
-    return new Response(null, { status: 302, headers });
+    return new Response(null, { status: redirectStatus, headers });
   }
 
   let message = "Authentication failed";
@@ -61,5 +62,6 @@ export async function authRedirectFromResponse(
 
   return redirect(
     `${failureRedirect}${failureRedirect.includes("?") ? "&" : "?"}error=${encodeURIComponent(message)}`,
+    redirectStatus,
   );
 }
