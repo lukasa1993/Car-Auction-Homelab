@@ -467,6 +467,7 @@ export class AuctionStore {
     const now = new Date().toISOString();
     const label = input.label ?? (keepExistingMetadata ? existing?.label ?? generic.label : generic.label);
     const carType = input.carType ?? (keepExistingMetadata ? existing?.carType ?? generic.carType : generic.carType);
+    const marker = input.marker ?? (keepExistingMetadata ? existing?.marker ?? generic.marker : generic.marker);
     const yearFrom = input.yearFrom ?? (existing?.yearFrom ?? inferred.inferredYear ?? inferred.yearFrom);
     const yearTo = input.yearTo ?? (existing?.yearTo ?? inferred.inferredYear ?? inferred.yearTo);
     const copartSlug = input.copartSlug ?? (inferred.copartSlug || existing?.copartSlug || "");
@@ -476,7 +477,7 @@ export class AuctionStore {
       key: input.key ?? (existing ? existing.key : inferred.key),
       label,
       carType,
-      marker: input.marker ?? (keepExistingMetadata ? existing?.marker ?? generic.marker : generic.marker),
+      marker,
       vinPattern: inferred.vinPattern,
       vinPrefix: inferred.vinPrefix,
       yearFrom,
@@ -484,7 +485,15 @@ export class AuctionStore {
       copartSlug,
       iaaiPath,
       enabledCopart: input.enabledCopart ?? (existing ? existing.enabledCopart : true),
-      enabledIaai: input.enabledIaai ?? (existing ? existing.enabledIaai : true),
+      enabledIaai: input.enabledIaai ?? (existing ? existing.enabledIaai : !isGenericVinTargetMetadata({
+        label,
+        carType,
+        marker,
+        vinPattern: inferred.vinPattern,
+        vinPrefix: inferred.vinPrefix,
+        copartSlug,
+        iaaiPath,
+      })),
       active: input.active ?? (existing ? existing.active : true),
       sortOrder: input.sortOrder ?? (existing ? existing.sortOrder : this.getNextVinTargetSortOrder()),
       createdAt: existing ? existing.createdAt : now,
@@ -813,6 +822,7 @@ export class AuctionStore {
         marker = ?,
         year_from = ?,
         year_to = ?,
+        enabled_iaai = ?,
         updated_at = ?
       WHERE id = ?
     `).run(
@@ -821,6 +831,7 @@ export class AuctionStore {
       shouldReplaceMetadata ? nextMarker : existing.marker,
       shouldReplaceYears ? nextYearFrom : existing.yearFrom,
       shouldReplaceYears ? nextYearTo : existing.yearTo,
+      shouldReplaceMetadata ? 1 : boolFlag(existing.enabledIaai),
       observedAt,
       existing.id,
     );

@@ -172,7 +172,7 @@ export function MainPage({
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1040px] flex-col gap-4">
         <header className="flex items-baseline gap-2">
-          <h1 className="text-base font-semibold">Tesla Auctions</h1>
+          <h1 className="text-base font-semibold">Auction Monitor</h1>
           <span className="text-[12px] text-muted-foreground">{formatGeneratedAt(generatedAt, nowMs)}</span>
         </header>
 

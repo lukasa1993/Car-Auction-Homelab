@@ -68,6 +68,12 @@ interface VinTargetMetadataUpdate {
   yearTo?: number | null;
 }
 
+interface TargetMetadataObservation {
+  targetKey: string;
+  vehicleTitle: string;
+  modelYear: number | null;
+}
+
 interface ScrapedRecordWithImages {
   record: ScrapedLotRecord;
   imageCandidates: string[];
@@ -507,28 +513,87 @@ function chooseMostCommonVehicleTitle(titles: string[]): string {
     .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length || left[0].localeCompare(right[0]))[0]?.[0] || "";
 }
 
-function buildDiscoveredTargetUpdates(records: ScrapedRecordWithImages[], targets: VinTarget[]): VinTargetMetadataUpdate[] {
-  const recordsByTarget = new Map<string, ScrapedRecordWithImages[]>();
-  for (const record of records) {
-    if (!record.record.targetKey) {
+function buildTargetMetadataObservationFromCandidate(
+  target: VinTarget,
+  candidate: { text: string; url: string; title?: string | null },
+): TargetMetadataObservation | null {
+  const text = normalizeWhitespace(candidate.text);
+  if (!/\/lot\/\d+/i.test(candidate.url) && !/\/VehicleDetail\/\d+/i.test(candidate.url)) {
+    return null;
+  }
+  if (!matchesVehicleIdentity(text, candidate.url || "", target)) {
+    return null;
+  }
+  const vin = extractMatchingVin(text, target);
+  if (!vin) {
+    return null;
+  }
+  const vehicleTitle = normalizeVehicleTitle(candidate.title || "");
+  return vehicleTitle
+    ? {
+        targetKey: target.key,
+        vehicleTitle,
+        modelYear: extractModelYear(text),
+      }
+    : null;
+}
+
+function buildTargetMetadataObservationFromCopartItem(target: VinTarget, item: any): TargetMetadataObservation | null {
+  const text = normalizeWhitespace(
+    [
+      item.ld,
+      item.fv && `VIN:${item.fv}`,
+      item.lotNumberStr && `Lot number:${item.lotNumberStr}`,
+      item.yn && `Location: ${item.yn}`,
+      item.dd && `Primary damage: ${item.dd}`,
+      item.sdd && `Secondary damage: ${item.sdd}`,
+      item.dynamicLotDetails?.currentBid > 0 ? `Current bid: $${item.dynamicLotDetails.currentBid}` : "",
+      buildCopartApiAuctionRaw(item),
+      item.lcd,
+      item.ess,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (!matchesVehicleIdentity(text, item.ldu || item.ld || "", target)) {
+    return null;
+  }
+  const vin = normalizeVinPattern(String(item.fv || ""));
+  if (!vin || !matchVehicleVinCode(vin, target)) {
+    return null;
+  }
+  const vehicleTitle = normalizeVehicleTitle(String(item.ld || ""));
+  return vehicleTitle
+    ? {
+        targetKey: target.key,
+        vehicleTitle,
+        modelYear: Number(item.lcy) || null,
+      }
+    : null;
+}
+
+function buildDiscoveredTargetUpdates(observations: TargetMetadataObservation[], targets: VinTarget[]): VinTargetMetadataUpdate[] {
+  const observationsByTarget = new Map<string, TargetMetadataObservation[]>();
+  for (const observation of observations) {
+    if (!observation.targetKey) {
       continue;
     }
-    const next = recordsByTarget.get(record.record.targetKey) || [];
-    next.push(record);
-    recordsByTarget.set(record.record.targetKey, next);
+    const next = observationsByTarget.get(observation.targetKey) || [];
+    next.push(observation);
+    observationsByTarget.set(observation.targetKey, next);
   }
 
   return targets.flatMap((target) => {
-    const targetRecords = recordsByTarget.get(target.key) || [];
-    if (targetRecords.length === 0) {
+    const targetObservations = observationsByTarget.get(target.key) || [];
+    if (targetObservations.length === 0) {
       return [];
     }
 
-    const titles = targetRecords
-      .map((item) => normalizeVehicleTitle(item.record.vehicleTitle || ""))
+    const titles = targetObservations
+      .map((item) => normalizeVehicleTitle(item.vehicleTitle || ""))
       .filter(Boolean);
-    const years = targetRecords
-      .map((item) => item.record.modelYear)
+    const years = targetObservations
+      .map((item) => item.modelYear)
       .filter((value): value is number => Number.isFinite(value));
     const sharedTitle = findSharedVehicleTitlePrefix(titles);
     const discoveredTitle = sharedTitle || chooseMostCommonVehicleTitle(titles);
@@ -555,6 +620,25 @@ function buildDiscoveredTargetUpdates(records: ScrapedRecordWithImages[], target
           }
         : {}),
     }];
+  });
+}
+
+function applyTargetUpdates(targets: VinTarget[], updates: VinTargetMetadataUpdate[]): VinTarget[] {
+  const updatesByKey = new Map(updates.map((update) => [update.targetKey, update]));
+  return targets.map((target) => {
+    const update = updatesByKey.get(target.key);
+    if (!update) {
+      return target;
+    }
+    return {
+      ...target,
+      label: update.label?.trim() || target.label,
+      carType: update.carType?.trim() || target.carType,
+      marker: update.marker?.trim() || target.marker,
+      yearFrom: update.yearFrom == null ? target.yearFrom : Number(update.yearFrom),
+      yearTo: update.yearTo == null ? target.yearTo : Number(update.yearTo),
+      enabledIaai: target.enabledIaai || !!update.label || !!update.carType || !!update.marker,
+    };
   });
 }
 
@@ -647,7 +731,10 @@ async function fetchScrapeConfig(baseUrl: string, token: string): Promise<{ conf
 
 function buildIaaiSearchUrl(target: VinTarget): string {
   const base = "https://www.iaai.com/Search?keyword=";
-  return `${base}${encodeURIComponent(target.vinPrefix)}`;
+  const exactYear = target.yearFrom === target.yearTo ? String(target.yearFrom) : "";
+  const family = normalizeVehicleTitle(target.label || target.carType || target.vinPrefix);
+  const query = normalizeWhitespace([exactYear, family].filter(Boolean).join(" ")) || target.vinPrefix;
+  return `${base}${encodeURIComponent(query)}`;
 }
 
 interface IaaiSearchCandidate {
@@ -935,7 +1022,12 @@ async function readIaaiSearchSnapshotFromHtml(page: Page, html: string, fallback
   }, { html, fallbackPageNumber });
 }
 
-async function fetchIaaiDirectMatches(page: Page, target: VinTarget, nowIso: string): Promise<{ records: ScrapedRecordWithImages[]; pagesFetched: number; candidatesScanned: number }> {
+async function fetchIaaiDirectMatches(
+  page: Page,
+  target: VinTarget,
+  nowIso: string,
+  observations: TargetMetadataObservation[],
+): Promise<{ records: ScrapedRecordWithImages[]; pagesFetched: number; candidatesScanned: number }> {
   const records: ScrapedRecordWithImages[] = [];
   const seenUrls = new Set<string>();
   let pagesFetched = 0;
@@ -1011,6 +1103,10 @@ async function fetchIaaiDirectMatches(page: Page, target: VinTarget, nowIso: str
       }
       seenUrls.add(candidate.url);
       newOnPage += 1;
+      const observation = buildTargetMetadataObservationFromCandidate(target, candidate);
+      if (observation) {
+        observations.push(observation);
+      }
       const record = buildRecord("iaai", fallbackYear, candidate, nowIso, target);
       if (!record) {
         continue;
@@ -1275,7 +1371,12 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
   return { record, imageCandidates: imageCandidates.slice(0, 8) };
 }
 
-async function fetchCopartMatches(page: Page, target: VinTarget, nowIso: string): Promise<ScrapedRecordWithImages[]> {
+async function fetchCopartMatches(
+  page: Page,
+  target: VinTarget,
+  nowIso: string,
+  observations: TargetMetadataObservation[],
+): Promise<ScrapedRecordWithImages[]> {
   const records: ScrapedRecordWithImages[] = [];
   const seenLots = new Set<string>();
   const entryLimit = 8;
@@ -1294,6 +1395,10 @@ async function fetchCopartMatches(page: Page, target: VinTarget, nowIso: string)
         continue;
       }
       seenLots.add(String(item.lotNumberStr || ""));
+      const observation = buildTargetMetadataObservationFromCopartItem(target, item);
+      if (observation) {
+        observations.push(observation);
+      }
       const record = buildCopartApiRecord(item, target, nowIso);
       if (record) {
         records.push(record);
@@ -2066,7 +2171,13 @@ async function verifyRunnerFreshness(baseUrl: string): Promise<void> {
   }
 }
 
-async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: string, scopes: CoveredScope[]): Promise<ScrapedRecordWithImages[]> {
+async function scrapeCopartTargets(
+  page: Page,
+  targets: VinTarget[],
+  nowIso: string,
+  scopes: CoveredScope[],
+  observations: TargetMetadataObservation[],
+): Promise<ScrapedRecordWithImages[]> {
   const records: ScrapedRecordWithImages[] = [];
   const copartTargets = targets.filter((item) => item.enabledCopart && item.active);
   for (const [index, target] of copartTargets.entries()) {
@@ -2086,7 +2197,7 @@ async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: str
     }
     await delayWithJitter(COPART_READY_SETTLE_MS, COPART_DELAY_JITTER_MS);
     try {
-      const targetRecords = await fetchCopartMatches(page, target, nowIso);
+      const targetRecords = await fetchCopartMatches(page, target, nowIso, observations);
       records.push(...targetRecords);
       scope.status = "complete";
       scope.notes = `${targetRecords.length} records${state.status === "ready" ? "" : ` (bootstrap ${state.status})`}`;
@@ -2099,13 +2210,24 @@ async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: str
   return records;
 }
 
-async function scrapeIaaiTargets(page: Page, targets: VinTarget[], nowIso: string, scopes: CoveredScope[]): Promise<ScrapedRecordWithImages[]> {
+async function scrapeIaaiTargets(
+  page: Page,
+  targets: VinTarget[],
+  nowIso: string,
+  scopes: CoveredScope[],
+  observations: TargetMetadataObservation[],
+): Promise<ScrapedRecordWithImages[]> {
   const records: ScrapedRecordWithImages[] = [];
   for (const target of targets.filter((item) => item.enabledIaai && item.active)) {
     const scope: CoveredScope = { sourceKey: "iaai", targetKey: target.key, status: "failed" };
     scopes.push(scope);
+    if (isGenericVinTargetMetadata(target)) {
+      scope.status = "partial";
+      scope.notes = "skipped pending Copart metadata discovery";
+      continue;
+    }
     try {
-      const result = await fetchIaaiDirectMatches(page, target, nowIso);
+      const result = await fetchIaaiDirectMatches(page, target, nowIso, observations);
       records.push(...result.records);
       scope.status = "complete";
       scope.notes = `${result.records.length} records across ${result.pagesFetched} pages`;
@@ -2170,6 +2292,7 @@ async function main(): Promise<void> {
   const nowIso = startedAt;
   const scopes: CoveredScope[] = [];
   const allRecords: ScrapedRecordWithImages[] = [];
+  const allObservations: TargetMetadataObservation[] = [];
 
   const sourceContexts: Partial<Record<SourceKey, BrowserContext>> = {};
   try {
@@ -2179,21 +2302,25 @@ async function main(): Promise<void> {
     if (args.siteKeys.includes("iaai")) {
       sourceContexts.iaai = await launchAuctionContext(args.headless, "iaai");
     }
-    const listPhaseTasks: Array<Promise<ScrapedRecordWithImages[]>> = [];
     if (sourceContexts.copart) {
       const page = sourceContexts.copart.pages()[0] || await sourceContexts.copart.newPage();
-      listPhaseTasks.push(scrapeCopartTargets(page, activeTargets, nowIso, scopes));
+      const copartRecords = await scrapeCopartTargets(page, activeTargets, nowIso, scopes, allObservations);
+      allRecords.push(...copartRecords);
     }
+
+    const copartTargetUpdates = buildDiscoveredTargetUpdates(allObservations, activeTargets);
+    const iaaiTargets = applyTargetUpdates(activeTargets, copartTargetUpdates);
+
     if (sourceContexts.iaai) {
       const iaaiPage = sourceContexts.iaai.pages()[0] || await sourceContexts.iaai.newPage();
-      listPhaseTasks.push(scrapeIaaiTargets(iaaiPage, activeTargets, nowIso, scopes));
+      const iaaiRecords = await scrapeIaaiTargets(iaaiPage, iaaiTargets, nowIso, scopes, allObservations);
+      allRecords.push(...iaaiRecords);
     }
-    const listPhaseRecords = await Promise.all(listPhaseTasks);
-    allRecords.push(...listPhaseRecords.flat());
+
     const dedupedRecords = Array.from(
       new Map(allRecords.map((item) => [`${item.record.sourceKey}|${item.record.lotNumber}`, item])).values(),
     );
-    const targetUpdates = buildDiscoveredTargetUpdates(dedupedRecords, activeTargets);
+    const targetUpdates = buildDiscoveredTargetUpdates(allObservations, activeTargets);
     const completedAt = new Date().toISOString();
     const ingestResult = await postIngest(args.baseUrl, ingestToken, scopes, dedupedRecords, targetUpdates, args, startedAt, completedAt);
     console.log(`Ingested ${dedupedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);

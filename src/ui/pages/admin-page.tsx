@@ -99,8 +99,8 @@ function TargetCard({ target }: { target: VinTarget }) {
         />
         <SummaryTile
           eyebrow="Search mode"
-          muted={awaitingCollectorMetadata ? "Collector will enrich title data from live matches." : "Collector-enriched from live auction matches."}
-          value={<code className="text-[13px]">{awaitingCollectorMetadata ? "Awaiting sync" : "Collector-backed"}</code>}
+          muted={awaitingCollectorMetadata ? "Copart discovery first. IAAI stays off until collector-backed metadata exists." : "Collector-enriched from live auction matches."}
+          value={<code className="text-[13px]">{awaitingCollectorMetadata ? "Copart first" : "Collector-backed"}</code>}
         />
       </div>
 
@@ -155,7 +155,7 @@ export function AdminPage({
               <CardTitle className="text-3xl tracking-tight sm:text-4xl">Mask-first target setup.</CardTitle>
               <CardDescription className="max-w-2xl text-base leading-7">
                 Enter masks or concrete prefixes like <code>7SAYGDEE*TF</code> or <code>1FTEW1E5XJK</code>.
-                Admin stores the prefix immediately. The collector resolves family metadata from live auction matches on the next sync.
+                Admin stores the prefix immediately. The collector resolves family metadata from Copart matches on the next sync.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 px-0 pt-5 sm:grid-cols-3">
@@ -169,7 +169,7 @@ export function AdminPage({
             <CardHeader>
               <CardTitle>Add target</CardTitle>
               <CardDescription>
-                Add the VIN family mask or concrete prefix. The collector fills in label metadata after it sees matching lots.
+                Add the VIN family mask or concrete prefix. Copart fills in label metadata after the collector sees matching lots.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -184,7 +184,6 @@ export function AdminPage({
                   </p>
                 </div>
                 <input name="enabledCopart" type="hidden" value="on" />
-                <input name="enabledIaai" type="hidden" value="on" />
                 <input name="active" type="hidden" value="on" />
                 <Button type="submit">
                   <Plus className="size-4" />

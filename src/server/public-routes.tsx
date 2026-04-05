@@ -11,9 +11,9 @@ const TAB_FILTER: Record<Tab, string | null> = {
 };
 
 function resolveTab(raw: string | null): Tab {
+  if (raw === "model3") return "model3";
   if (raw === "modely") return "modely";
-  if (raw === "all") return "all";
-  return "model3";
+  return "all";
 }
 
 export function handlePublicPages(
@@ -33,7 +33,7 @@ export function handlePublicPages(
   const filteredLots = carTypeFilter ? allLots.filter((lot) => lot.carType === carTypeFilter) : allLots;
 
   return renderPage(
-    "Tesla Auctions",
+    "Auction Monitor",
     {
       kind: "main",
       props: {
