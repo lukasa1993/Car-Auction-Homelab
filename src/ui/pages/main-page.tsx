@@ -48,10 +48,16 @@ function ImageCell({ lot }: { lot: LotListItem }) {
 
 function LotSourceCell({ lot }: { lot: LotListItem }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="font-medium text-foreground">Lot {lot.lotNumber}</div>
-      <div className="text-[11px] text-muted-foreground">{lot.sourceLabel}</div>
-      {lot.location ? <span className="text-[11px] text-muted-foreground">{lot.location}</span> : null}
+    <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-muted-foreground sm:flex-col sm:gap-1">
+      <span className="font-medium text-foreground">Lot {lot.lotNumber}</span>
+      <span aria-hidden className="sm:hidden">·</span>
+      <span>{lot.sourceLabel}</span>
+      {lot.location ? (
+        <>
+          <span aria-hidden className="sm:hidden">·</span>
+          <span>{lot.location}</span>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -207,8 +213,8 @@ export function MainPage({
               <CardTitle className="text-sm">Upcoming &lt; 12h</CardTitle>
             </CardHeader>
             <CardContent className="pt-2">
-              <Table>
-                <TableHeader>
+              <Table className="block sm:table">
+                <TableHeader className="hidden sm:table-header-group">
                   <TableRow>
                     <TableHead>Status</TableHead>
                     <TableHead>Image</TableHead>
@@ -217,17 +223,20 @@ export function MainPage({
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody className="block sm:table-row-group">
                   {soonLots.map((lot) => (
-                    <TableRow key={`${lot.sourceKey}:${lot.lotNumber}`}>
-                      <TableCell>
-                        <span className="whitespace-nowrap text-sm">{formatAuctionCountdown(lot.auctionDate, nowMs) || "Time TBD"}</span>
-                        {lot.modelYear ? <span className="mt-0.5 block text-[11px] text-muted-foreground">MY {lot.modelYear}</span> : null}
+                    <TableRow
+                      className="grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-1 px-3 py-3 hover:bg-transparent sm:table-row sm:gap-0 sm:p-0 sm:hover:bg-muted/50"
+                      key={`${lot.sourceKey}:${lot.lotNumber}`}
+                    >
+                      <TableCell className="col-start-2 row-start-1 p-0 sm:p-3">
+                        <span className="whitespace-nowrap text-sm font-medium sm:font-normal">{formatAuctionCountdown(lot.auctionDate, nowMs) || "Time TBD"}</span>
+                        {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
                       </TableCell>
-                      <TableCell><ImageCell lot={lot} /></TableCell>
-                      <TableCell className="text-sm">{stripTeslaPrefix(lot.carType)}</TableCell>
-                      <TableCell><LotSourceCell lot={lot} /></TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
+                      <TableCell className="col-start-2 row-start-2 p-0 text-sm sm:p-3">{stripTeslaPrefix(lot.carType)}</TableCell>
+                      <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
+                      <TableCell className="col-span-2 row-start-4 p-0 pt-2 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
                         <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                       </TableCell>
                     </TableRow>
@@ -251,8 +260,8 @@ export function MainPage({
             </div>
           </CardHeader>
           <CardContent className="pt-2">
-            <Table>
-              <TableHeader>
+            <Table className="block sm:table">
+              <TableHeader className="hidden sm:table-header-group">
                 <TableRow>
                   <TableHead>Status</TableHead>
                   <TableHead>Image</TableHead>
@@ -262,24 +271,26 @@ export function MainPage({
                   <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody className="block sm:table-row-group">
                 {remainingLots.map((lot) => (
                   <TableRow
                     key={`${lot.sourceKey}:${lot.lotNumber}`}
-                    className={lot.status === "done" ? "opacity-35" : ""}
+                    className={`grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-1 px-3 py-3 hover:bg-transparent sm:table-row sm:gap-0 sm:p-0 sm:hover:bg-muted/50${
+                      lot.status === "done" ? " opacity-35" : ""
+                    }`}
                   >
-                    <TableCell>
-                      <span className="whitespace-nowrap text-sm">{formatAuctionCountdown(lot.auctionDate, nowMs) || (lot.auctionDate ? "Time TBD" : "Date pending")}</span>
-                      {lot.modelYear ? <span className="mt-0.5 block text-[11px] text-muted-foreground">MY {lot.modelYear}</span> : null}
+                    <TableCell className="col-start-2 row-start-1 p-0 sm:p-3">
+                      <span className="whitespace-nowrap text-sm font-medium sm:font-normal">{formatAuctionCountdown(lot.auctionDate, nowMs) || (lot.auctionDate ? "Time TBD" : "Date pending")}</span>
+                      {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
                     </TableCell>
-                    <TableCell><ImageCell lot={lot} /></TableCell>
+                    <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
                     <TableCell className="hidden sm:table-cell">
                       <div className="text-sm">{formatAuctionDateDisplay(lot)}</div>
                       {hasExactAuctionTime(lot.auctionDate) ? <div className="mt-0.5 text-[11px] text-muted-foreground">{formatLocalAuctionTime(lot.auctionDate)}</div> : null}
                     </TableCell>
-                    <TableCell className="text-sm">{stripTeslaPrefix(lot.carType)}</TableCell>
-                    <TableCell><LotSourceCell lot={lot} /></TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="col-start-2 row-start-2 p-0 text-sm sm:p-3">{stripTeslaPrefix(lot.carType)}</TableCell>
+                    <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
+                    <TableCell className="col-span-2 row-start-4 p-0 pt-2 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
                       <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                     </TableCell>
                   </TableRow>
