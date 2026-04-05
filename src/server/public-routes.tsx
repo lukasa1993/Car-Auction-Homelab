@@ -37,7 +37,7 @@ function resolveTab(raw: string | null, availableTabs: Array<{ key: string }>): 
 export function handlePublicPages(
   pathname: string,
   url: URL,
-  _authState: AuthState,
+  authState: AuthState,
   services: ServerServices,
 ): Response | null {
   if (pathname !== "/") {
@@ -64,6 +64,11 @@ export function handlePublicPages(
       props: {
         activeTab,
         allLots,
+        auth: {
+          signedIn: authState.signedIn,
+          admin: authState.admin,
+          email: authState.email,
+        },
         generatedAt: new Date().toISOString(),
         lots: filteredLots,
         tabs: modelTabs.map((tab) => ({

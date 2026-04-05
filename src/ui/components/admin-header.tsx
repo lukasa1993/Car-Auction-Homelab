@@ -1,48 +1,54 @@
 import * as React from "react";
-import { ArrowLeft } from "lucide-react";
 
-import { Button } from "./button";
 import { UserMenu } from "./user-menu";
+
+type AdminSection = "targets" | "history";
+
+const NAV_ITEMS: Array<{ key: AdminSection; label: string; href: string }> = [
+  { key: "targets", label: "Targets", href: "/admin" },
+  { key: "history", label: "History", href: "/admin/history" },
+];
 
 export interface AdminHeaderProps {
   email: string;
-  eyebrow: string;
-  title: string;
-  backHref?: string;
-  backLabel?: string;
-  actions?: React.ReactNode;
+  active: AdminSection;
+  historyCount?: number;
 }
 
-export function AdminHeader({
-  email,
-  eyebrow,
-  title,
-  backHref,
-  backLabel = "Back",
-  actions,
-}: AdminHeaderProps) {
+export function AdminHeader({ email, active, historyCount }: AdminHeaderProps) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-3">
-        {backHref ? (
-          <a href={backHref}>
-            <Button size="sm" variant="outline">
-              <ArrowLeft className="size-3.5" />
-              {backLabel}
-            </Button>
-          </a>
-        ) : null}
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            {eyebrow}
-          </div>
-          <h1 className="mt-0.5 text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
-        </div>
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+      <div className="flex items-center gap-4">
+        <a className="flex items-baseline gap-2" href="/">
+          <span className="text-base font-semibold tracking-tight text-foreground">Auction Monitor</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Admin
+          </span>
+        </a>
+        <nav className="flex items-center gap-0.5 rounded-3xl bg-muted p-0.5">
+          {NAV_ITEMS.map((item) => {
+            const isActive = item.key === active;
+            const count = item.key === "history" ? historyCount : undefined;
+            return (
+              <a
+                className={`inline-flex items-center gap-1.5 rounded-3xl px-3 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                href={item.href}
+                key={item.key}
+              >
+                {item.label}
+                {typeof count === "number" && count > 0 ? (
+                  <span className="tabular-nums text-muted-foreground/70">{count}</span>
+                ) : null}
+              </a>
+            );
+          })}
+        </nav>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {actions}
-        <UserMenu email={email} />
-      </div>
+      <UserMenu email={email} />
     </header>
   );
 }

@@ -52,31 +52,6 @@ function sortHistory(lots: LotListItem[]): LotListItem[] {
   });
 }
 
-function StatPill({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: number | string;
-  tone?: "default" | "destructive" | "success";
-}) {
-  const toneClass =
-    tone === "destructive"
-      ? "text-destructive"
-      : tone === "success"
-        ? "text-emerald-700 dark:text-emerald-300"
-        : "text-foreground";
-  return (
-    <div className="flex items-baseline gap-2 rounded-2xl border border-border bg-card px-3 py-2">
-      <span className={`text-lg font-semibold tabular-nums ${toneClass}`}>{value}</span>
-      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </span>
-    </div>
-  );
-}
-
 function FilterChip({
   active,
   count,
@@ -193,18 +168,13 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
   return (
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1120px] flex-col gap-4">
-        <AdminHeader
-          backHref="/admin"
-          backLabel="Targets"
-          email={email}
-          eyebrow="Admin history"
-          title="Moderation history"
-        />
+        <AdminHeader active="history" email={email} historyCount={counts.all} />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <StatPill label="total" value={counts.all} />
-          <StatPill label="hidden" tone="destructive" value={counts.removed} />
-          <StatPill label="approved" tone="success" value={counts.approved} />
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Moderation history</h1>
+          <p className="text-sm text-muted-foreground">
+            {counts.all} moderated · {counts.removed} hidden · {counts.approved} approved
+          </p>
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-2 sm:flex-row sm:items-center sm:justify-between">

@@ -1,8 +1,6 @@
 import * as React from "react";
 import { ChevronDown, LogOut } from "lucide-react";
 
-import { Badge } from "./badge";
-
 function getInitials(email: string): string {
   const name = email.split("@")[0] || email;
   const parts = name.split(/[._-]/).filter(Boolean);
@@ -14,11 +12,10 @@ function getInitials(email: string): string {
 
 export interface UserMenuProps {
   email: string;
-  admin?: boolean;
   logoutAction?: string;
 }
 
-export function UserMenu({ email, admin = true, logoutAction = "/admin/logout" }: UserMenuProps) {
+export function UserMenu({ email, logoutAction = "/admin/logout" }: UserMenuProps) {
   const [open, setOpen] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -71,11 +68,6 @@ export function UserMenu({ email, admin = true, logoutAction = "/admin/logout" }
             <div className="mt-1 truncate text-sm font-medium text-foreground" title={email}>
               {email}
             </div>
-            {admin ? (
-              <div className="mt-2">
-                <Badge variant="success">Admin</Badge>
-              </div>
-            ) : null}
           </div>
           <form action={logoutAction} method="post">
             <button

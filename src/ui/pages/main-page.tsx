@@ -26,6 +26,7 @@ export interface MainPageProps {
   generatedAt: string;
   activeTab: string;
   tabs: MainPageTab[];
+  auth: { signedIn: boolean; admin: boolean; email: string | null };
 }
 
 function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
@@ -156,6 +157,7 @@ export function MainPage({
   generatedAt,
   activeTab,
   tabs,
+  auth,
 }: MainPageProps) {
   const [allLotsState, setAllLotsState] = React.useState(allLots);
   const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
@@ -182,9 +184,19 @@ export function MainPage({
   return (
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1040px] flex-col gap-4">
-        <header className="flex items-baseline gap-2">
-          <h1 className="text-base font-semibold">Auction Monitor</h1>
-          <span className="text-[12px] text-muted-foreground">{formatGeneratedAt(generatedAt, nowMs)}</span>
+        <header className="flex items-baseline justify-between gap-3">
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-base font-semibold">Auction Monitor</h1>
+            <span className="text-[12px] text-muted-foreground">{formatGeneratedAt(generatedAt, nowMs)}</span>
+          </div>
+          {auth.admin ? (
+            <a
+              className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+              href="/admin"
+            >
+              Admin →
+            </a>
+          ) : null}
         </header>
 
         {soonLots.length > 0 ? (

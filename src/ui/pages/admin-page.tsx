@@ -95,19 +95,14 @@ export function AdminPage({
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-[1120px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <AdminHeader
-          actions={
-            <a href="/admin/history">
-              <Button size="sm" variant="outline">
-                History{historyCount ? ` (${historyCount})` : ""}
-              </Button>
-            </a>
-          }
-          backHref="/"
-          email={email}
-          eyebrow="Admin registry"
-          title="VIN family targets"
-        />
+        <AdminHeader active="targets" email={email} historyCount={historyCount} />
+
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">VIN family targets</h1>
+          <p className="text-sm text-muted-foreground">
+            {targets.length} total · {activeTargets} active
+          </p>
+        </div>
 
         {error ? (
           <div className="rounded-[24px] border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -155,14 +150,6 @@ export function AdminPage({
         </Card>
 
         <section className="grid gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight">Targets</h2>
-              <p className="text-sm text-muted-foreground">
-                {targets.length} total · {activeTargets} active
-              </p>
-            </div>
-          </div>
           {targets.length ? (
             targets.map((target) => <TargetCard key={target.id} target={target} />)
           ) : (
