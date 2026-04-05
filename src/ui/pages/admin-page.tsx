@@ -115,52 +115,63 @@ export function AdminPage({
           </div>
         ) : null}
 
-        <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:items-start">
-          <Card>
-            <CardHeader>
-              <CardTitle>Add target</CardTitle>
-              <CardDescription>Enter a mask or concrete VIN prefix.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form action="/admin/targets" className="space-y-4" method="post">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" htmlFor="vinPattern">
-                    VIN family mask
-                  </label>
-                  <Input id="vinPattern" name="vinPattern" placeholder="1FTEW1E5XJK" required spellCheck={false} />
-                  <p className="text-sm text-muted-foreground">Use <code>*</code> for wildcard characters.</p>
-                </div>
-                <input name="enabledCopart" type="hidden" value="on" />
-                <input name="active" type="hidden" value="on" />
-                <Button type="submit">
-                  <Plus className="size-4" />
-                  Add target
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight">Targets</h2>
+        <Card>
+          <CardHeader>
+            <CardTitle>Add target</CardTitle>
+            <CardDescription>Enter a mask or concrete VIN prefix.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              action="/admin/targets"
+              className="flex flex-col gap-3 sm:flex-row sm:items-end"
+              method="post"
+            >
+              <div className="flex-1 space-y-2">
+                <label
+                  className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+                  htmlFor="vinPattern"
+                >
+                  VIN family mask
+                </label>
+                <Input
+                  id="vinPattern"
+                  name="vinPattern"
+                  placeholder="1FTEW1E5XJK"
+                  required
+                  spellCheck={false}
+                />
                 <p className="text-sm text-muted-foreground">
-                  {targets.length} total · {activeTargets} active
+                  Use <code>*</code> for wildcard characters.
                 </p>
               </div>
+              <input name="enabledCopart" type="hidden" value="on" />
+              <input name="active" type="hidden" value="on" />
+              <Button className="sm:self-end" type="submit">
+                <Plus className="size-4" />
+                Add target
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <section className="grid gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Targets</h2>
+              <p className="text-sm text-muted-foreground">
+                {targets.length} total · {activeTargets} active
+              </p>
             </div>
-            {targets.length ? (
-              targets.map((target) => (
-                <TargetCard key={target.id} target={target} />
-              ))
-            ) : (
-              <Card>
-                <CardContent className="py-8 text-sm text-muted-foreground">
-                  No targets yet.
-                </CardContent>
-              </Card>
-            )}
           </div>
+          {targets.length ? (
+            targets.map((target) => <TargetCard key={target.id} target={target} />)
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-sm text-muted-foreground">
+                No targets yet.
+              </CardContent>
+            </Card>
+          )}
         </section>
       </div>
     </main>
