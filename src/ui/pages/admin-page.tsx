@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowLeft, Plus } from "lucide-react";
 
 import type { VinTarget } from "../../lib/types";
-import { inferVinTargetDefinition } from "../../lib/vin-patterns";
+import { isGenericVinTargetMetadata } from "../../lib/vin-patterns";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/card";
@@ -48,7 +48,7 @@ function SummaryTile({
 }
 
 function TargetCard({ target }: { target: VinTarget }) {
-  const inferred = inferVinTargetDefinition(target.vinPattern);
+  const awaitingCollectorMetadata = isGenericVinTargetMetadata(target);
 
   return (
     <form
@@ -77,7 +77,7 @@ function TargetCard({ target }: { target: VinTarget }) {
           defaultValue={target.vinPattern}
           id={`vin-${target.id}`}
           name="vinPattern"
-          placeholder="7SAYGDEE*TF"
+          placeholder="1FTEW1E5XJK"
           spellCheck={false}
         />
         <p className="text-sm text-muted-foreground">
@@ -89,18 +89,18 @@ function TargetCard({ target }: { target: VinTarget }) {
       <div className="grid gap-3 md:grid-cols-3">
         <SummaryTile
           eyebrow="Prefix query"
-          muted="Used for Copart search narrowing."
+          muted="Used directly across source searches."
           value={<code className="text-[13px]">{target.vinPrefix}</code>}
         />
         <SummaryTile
-          eyebrow="Auto-detected"
+          eyebrow="Metadata"
           muted={`Year window ${formatYearWindow(target)}`}
-          value={inferred.modelLabel ?? "Tesla family"}
+          value={awaitingCollectorMetadata ? "Pending collector discovery" : target.label}
         />
         <SummaryTile
-          eyebrow="Search routes"
-          muted={target.iaaiPath || "No IAAI path inferred"}
-          value={target.copartSlug || "No Copart slug inferred"}
+          eyebrow="Search mode"
+          muted={awaitingCollectorMetadata ? "Collector will enrich title data from live matches." : "Collector-enriched from live auction matches."}
+          value={<code className="text-[13px]">{awaitingCollectorMetadata ? "Awaiting sync" : "Collector-backed"}</code>}
         />
       </div>
 
@@ -115,6 +115,7 @@ function TargetCard({ target }: { target: VinTarget }) {
 
 export function AdminPage({
   email,
+  error,
   historyCount,
   targets,
 }: AdminPageProps) {
@@ -142,13 +143,19 @@ export function AdminPage({
           </div>
         </header>
 
+        {error ? (
+          <div className="rounded-[24px] border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {error}
+          </div>
+        ) : null}
+
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
           <Card className="border-none bg-transparent shadow-none ring-0">
             <CardHeader className="px-0 pb-0">
               <CardTitle className="text-3xl tracking-tight sm:text-4xl">Mask-first target setup.</CardTitle>
               <CardDescription className="max-w-2xl text-base leading-7">
-                Enter masks like <code>7SAYGDEE*TF</code>. The system derives the model, source routes,
-                and search prefix so the runner only needs one VIN family definition.
+                Enter masks or concrete prefixes like <code>7SAYGDEE*TF</code> or <code>1FTEW1E5XJK</code>.
+                Admin stores the prefix immediately. The collector resolves family metadata from live auction matches on the next sync.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 px-0 pt-5 sm:grid-cols-3">
@@ -162,7 +169,7 @@ export function AdminPage({
             <CardHeader>
               <CardTitle>Add target</CardTitle>
               <CardDescription>
-                Only the VIN family mask is required for new entries.
+                Add the VIN family mask or concrete prefix. The collector fills in label metadata after it sees matching lots.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -171,7 +178,7 @@ export function AdminPage({
                   <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" htmlFor="vinPattern">
                     VIN family mask
                   </label>
-                  <Input id="vinPattern" name="vinPattern" placeholder="7SAYGDEE*TF" required spellCheck={false} />
+                  <Input id="vinPattern" name="vinPattern" placeholder="1FTEW1E5XJK" required spellCheck={false} />
                   <p className="text-sm text-muted-foreground">
                     The trailing VIN serial stays implicit. The collector expands it when matching live lots.
                   </p>
@@ -200,6 +207,7 @@ export function AdminPage({
 
 export interface AdminPageProps {
   email: string;
+  error?: string | null;
   historyCount: number;
   targets: VinTarget[];
 }

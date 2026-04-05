@@ -2,7 +2,7 @@
   "name": "lnh-auction-collector-runtime",
   "private": true,
   "type": "module",
-  "version": "2026.04.04.1",
+  "version": "2026.04.05.1",
   "scripts": {
     "bootstrap": "bun bootstrap.js",
     "collect": "bun auction-runner.js"

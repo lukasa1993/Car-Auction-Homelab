@@ -40,6 +40,7 @@ export async function handleAdminPages(
         kind: "admin",
         props: {
           email: authState.email,
+          error: url.searchParams.get("error"),
           historyCount,
           targets: services.store.getVinTargets(),
         },
@@ -121,7 +122,12 @@ export async function handleAdminPages(
       return redirect("/admin?error=Admin%20access%20required");
     }
     const form = await request.formData();
-    services.store.upsertVinTarget(parseTargetForm(form));
+    try {
+      services.store.upsertVinTarget(parseTargetForm(form));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save target";
+      return redirect(`/admin?error=${encodeURIComponent(message)}`);
+    }
     return redirect("/admin");
   }
 
@@ -133,7 +139,12 @@ export async function handleAdminPages(
     const form = await request.formData();
     const payload = parseTargetForm(form, { id: decodeURIComponent(targetUpdateMatch[1]) });
     payload.id = decodeURIComponent(targetUpdateMatch[1]);
-    services.store.upsertVinTarget(payload);
+    try {
+      services.store.upsertVinTarget(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save target";
+      return redirect(`/admin?error=${encodeURIComponent(message)}`);
+    }
     return redirect("/admin");
   }
 

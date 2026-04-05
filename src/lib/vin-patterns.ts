@@ -1,6 +1,9 @@
 const VIN_WILDCARD = "*";
 const VIN_WILDCARD_REGEX = /[?*]/g;
 const VIN_CORE_CHARSET = "[A-HJ-NPR-Z0-9*]";
+const VIN_ALLOWED_PATTERN = /^[A-HJ-NPR-Z0-9*]+$/;
+export const DEFAULT_GENERIC_YEAR_FROM = 2001;
+export const DEFAULT_GENERIC_YEAR_TO = 2030;
 
 const TESLA_MODEL_BY_CODE = {
   "3": {
@@ -101,21 +104,67 @@ export function inferVinModelYear(value: string): number | null {
   return MODEL_YEAR_BY_CODE[yearCode] ?? null;
 }
 
+export function getVinTargetValidationError(value: string): string | null {
+  const vinPattern = normalizeVinPattern(value);
+  if (!vinPattern) {
+    return "VIN pattern is required.";
+  }
+  if (vinPattern.length > 17) {
+    return "VIN pattern cannot be longer than 17 characters.";
+  }
+  if (!VIN_ALLOWED_PATTERN.test(vinPattern)) {
+    return "VIN pattern can only contain VIN characters and *.";
+  }
+  if (!deriveVinPrefix(vinPattern)) {
+    return "VIN pattern must begin with a concrete VIN prefix before any wildcard.";
+  }
+  return null;
+}
+
+export function isGenericVinTargetMetadata(value: {
+  label?: string | null;
+  carType?: string | null;
+  marker?: string | null;
+  vinPattern?: string | null;
+  vinPrefix?: string | null;
+  copartSlug?: string | null;
+  iaaiPath?: string | null;
+}): boolean {
+  const vinPattern = normalizeVinPattern(String(value.vinPattern || ""));
+  const vinPrefix = normalizeVinPattern(String(value.vinPrefix || deriveVinPrefix(vinPattern)));
+  const label = String(value.label || "").trim();
+  const carType = String(value.carType || "").trim();
+  const marker = String(value.marker || "").trim();
+  const copartSlug = String(value.copartSlug || "").trim();
+  const iaaiPath = String(value.iaaiPath || "").trim();
+
+  return (
+    (!!vinPrefix && label === vinPrefix && carType === vinPrefix && marker === `VIN · ${vinPattern}`) ||
+    (label === "Tesla" && carType === "Tesla" && !copartSlug && !iaaiPath)
+  );
+}
+
+export function hasGenericVinTargetYearRange(value: { yearFrom?: number | null; yearTo?: number | null }): boolean {
+  return Number(value.yearFrom) === DEFAULT_GENERIC_YEAR_FROM && Number(value.yearTo) === DEFAULT_GENERIC_YEAR_TO;
+}
+
 export function inferVinTargetDefinition(value: string) {
   const vinPattern = normalizeVinPattern(value);
+  const vinPrefix = deriveVinPrefix(vinPattern);
   const model = inferTeslaModel(vinPattern);
   const year = inferVinModelYear(vinPattern);
   const keyBase = slugifyVinPattern(vinPattern) || "vin-target";
+  const genericLabel = vinPrefix || vinPattern || "VIN target";
 
   return {
     vinPattern,
-    vinPrefix: deriveVinPrefix(vinPattern),
-    key: `${model?.copartSlug ?? "tesla"}-${keyBase}`,
-    label: model?.label ?? "Tesla",
-    carType: model?.carType ?? "Tesla",
-    marker: `${model?.label ?? "Tesla"} · ${vinPattern}`,
-    yearFrom: year ?? 2024,
-    yearTo: year ?? 2027,
+    vinPrefix,
+    key: `${model?.copartSlug ?? "vin"}-${keyBase}`,
+    label: model?.label ?? genericLabel,
+    carType: model?.carType ?? genericLabel,
+    marker: model?.label ? `${model.label} · ${vinPattern}` : `VIN · ${vinPattern}`,
+    yearFrom: year ?? DEFAULT_GENERIC_YEAR_FROM,
+    yearTo: year ?? DEFAULT_GENERIC_YEAR_TO,
     copartSlug: model?.copartSlug ?? "",
     iaaiPath: model?.iaaiPath ?? "",
     modelLabel: model?.label ?? null,

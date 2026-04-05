@@ -5,7 +5,12 @@ import { mkdir } from "node:fs/promises";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { DateTime } from "luxon";
 
-import { buildVinMaskRegex, normalizeVinPattern } from "../src/lib/vin-patterns";
+import {
+  buildVinMaskRegex,
+  hasGenericVinTargetYearRange,
+  isGenericVinTargetMetadata,
+  normalizeVinPattern,
+} from "../src/lib/vin-patterns";
 
 type SourceKey = "copart" | "iaai";
 type RunnerScopeStatus = "complete" | "failed" | "partial";
@@ -45,12 +50,22 @@ interface ScrapedLotRecord {
   vin: string;
   lotNumber: string;
   sourceDetailId?: string | null;
+  vehicleTitle?: string | null;
   status: "upcoming" | "done" | "unknown" | "missing" | "canceled";
   auctionDate: string;
   auctionDateRaw: string;
   location: string;
   url: string;
   evidence: string;
+}
+
+interface VinTargetMetadataUpdate {
+  targetKey: string;
+  label?: string;
+  carType?: string;
+  marker?: string;
+  yearFrom?: number | null;
+  yearTo?: number | null;
 }
 
 interface ScrapedRecordWithImages {
@@ -452,11 +467,98 @@ function extractLocation(text: string): string {
 }
 
 function extractModelYear(text: string): number | null {
-  const match = text.match(/\b(2020|2021|2022|2023|2024|2025|2026|2027)\b/);
+  const match = text.match(/\b(19\d{2}|20\d{2})\b/);
   return match ? Number(match[1]) : null;
 }
 
-function buildRecord(sourceKey: SourceKey, yearPage: number, candidate: { text: string; url: string }, nowIso: string, target: VinTarget): ScrapedLotRecord | null {
+function normalizeVehicleTitle(value: string): string {
+  return normalizeWhitespace(String(value || "").replace(/^(19\d{2}|20\d{2})\s+/, ""));
+}
+
+function splitVehicleTitleTokens(value: string): string[] {
+  return normalizeVehicleTitle(value).split(/\s+/).filter(Boolean);
+}
+
+function findSharedVehicleTitlePrefix(titles: string[]): string {
+  if (titles.length === 0) {
+    return "";
+  }
+  const tokenSets = titles.map(splitVehicleTitleTokens).filter((tokens) => tokens.length > 0);
+  if (tokenSets.length === 0) {
+    return "";
+  }
+  const prefix: string[] = [];
+  for (let index = 0; index < tokenSets[0].length; index += 1) {
+    const token = tokenSets[0][index];
+    if (!tokenSets.every((tokens) => tokens[index] === token)) {
+      break;
+    }
+    prefix.push(token);
+  }
+  return prefix.length >= 2 ? prefix.join(" ") : "";
+}
+
+function chooseMostCommonVehicleTitle(titles: string[]): string {
+  const counts = new Map<string, number>();
+  for (const title of titles.map(normalizeVehicleTitle).filter(Boolean)) {
+    counts.set(title, (counts.get(title) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length || left[0].localeCompare(right[0]))[0]?.[0] || "";
+}
+
+function buildDiscoveredTargetUpdates(records: ScrapedRecordWithImages[], targets: VinTarget[]): VinTargetMetadataUpdate[] {
+  const recordsByTarget = new Map<string, ScrapedRecordWithImages[]>();
+  for (const record of records) {
+    if (!record.record.targetKey) {
+      continue;
+    }
+    const next = recordsByTarget.get(record.record.targetKey) || [];
+    next.push(record);
+    recordsByTarget.set(record.record.targetKey, next);
+  }
+
+  return targets.flatMap((target) => {
+    const targetRecords = recordsByTarget.get(target.key) || [];
+    if (targetRecords.length === 0) {
+      return [];
+    }
+
+    const titles = targetRecords
+      .map((item) => normalizeVehicleTitle(item.record.vehicleTitle || ""))
+      .filter(Boolean);
+    const years = targetRecords
+      .map((item) => item.record.modelYear)
+      .filter((value): value is number => Number.isFinite(value));
+    const sharedTitle = findSharedVehicleTitlePrefix(titles);
+    const discoveredTitle = sharedTitle || chooseMostCommonVehicleTitle(titles);
+    const shouldUpdateMetadata = isGenericVinTargetMetadata(target) && !!discoveredTitle;
+    const shouldUpdateYears = hasGenericVinTargetYearRange(target) && years.length > 0;
+
+    if (!shouldUpdateMetadata && !shouldUpdateYears) {
+      return [];
+    }
+
+    return [{
+      targetKey: target.key,
+      ...(shouldUpdateMetadata
+        ? {
+            label: discoveredTitle,
+            carType: discoveredTitle,
+            marker: `${discoveredTitle} · ${target.vinPattern}`,
+          }
+        : {}),
+      ...(shouldUpdateYears
+        ? {
+            yearFrom: Math.min(...years),
+            yearTo: Math.max(...years),
+          }
+        : {}),
+    }];
+  });
+}
+
+function buildRecord(sourceKey: SourceKey, yearPage: number | null, candidate: { text: string; url: string; title?: string | null }, nowIso: string, target: VinTarget): ScrapedLotRecord | null {
   const text = normalizeWhitespace(candidate.text);
   if (!/\/lot\/\d+/i.test(candidate.url) && !/\/VehicleDetail\/\d+/i.test(candidate.url)) {
     return null;
@@ -474,7 +576,7 @@ function buildRecord(sourceKey: SourceKey, yearPage: number, candidate: { text: 
   const auctionDate = dateInfo ? dateInfo.value : "";
   const auctionDateRaw = dateInfo ? dateInfo.raw : "";
   const modelYear = extractModelYear(text) ?? yearPage;
-  if (modelYear < target.yearFrom || modelYear > target.yearTo) {
+  if (modelYear != null && (modelYear < target.yearFrom || modelYear > target.yearTo)) {
     return null;
   }
   const record: ScrapedLotRecord = {
@@ -489,6 +591,7 @@ function buildRecord(sourceKey: SourceKey, yearPage: number, candidate: { text: 
     vin,
     lotNumber: extractLot(text, candidate.url),
     sourceDetailId: sourceKey === "iaai" ? candidate.url.match(/\/VehicleDetail\/(\d+)/i)?.[1] || null : null,
+    vehicleTitle: normalizeVehicleTitle(candidate.title || ""),
     status,
     auctionDate,
     auctionDateRaw,
@@ -542,25 +645,13 @@ async function fetchScrapeConfig(baseUrl: string, token: string): Promise<{ conf
   });
 }
 
-function buildIaaiSearchUrl(target: VinTarget, year: number): string {
+function buildIaaiSearchUrl(target: VinTarget): string {
   const base = "https://www.iaai.com/Search?keyword=";
-  const modelTerm = decodeIaaiSearchTerm(target.iaaiPath);
-  return `${base}${encodeURIComponent(`${year} Tesla ${modelTerm}`)}`;
-}
-
-function decodeIaaiSearchTerm(value: string): string {
-  const trimmed = normalizeWhitespace(String(value || ""));
-  if (!trimmed) {
-    return "";
-  }
-  try {
-    return normalizeWhitespace(decodeURIComponent(trimmed));
-  } catch {
-    return trimmed;
-  }
+  return `${base}${encodeURIComponent(target.vinPrefix)}`;
 }
 
 interface IaaiSearchCandidate {
+  title: string;
   text: string;
   url: string;
   imageCandidates: string[];
@@ -795,9 +886,10 @@ async function readIaaiSearchSnapshotFromHtml(page: Page, html: string, fallback
             .filter(Boolean),
         ),
       );
+      const titleText = normalize(titleLink.textContent);
       const text = normalize(
         [
-          normalize(titleLink.textContent),
+          titleText,
           stockNumber ? `Stock #: ${stockNumber}` : "",
           saleDoc ? `Title/Sale Doc: ${saleDoc}` : "",
           primaryDamage ? `Primary Damage: ${primaryDamage}` : "",
@@ -825,7 +917,7 @@ async function readIaaiSearchSnapshotFromHtml(page: Page, html: string, fallback
       if (!text) {
         continue;
       }
-      candidates.push({ text, url, imageCandidates });
+      candidates.push({ title: titleText, text, url, imageCandidates });
     }
 
     return {
@@ -848,87 +940,85 @@ async function fetchIaaiDirectMatches(page: Page, target: VinTarget, nowIso: str
   const seenUrls = new Set<string>();
   let pagesFetched = 0;
   let candidatesScanned = 0;
+  const searchUrl = buildIaaiSearchUrl(target);
+  const fallbackYear = target.yearFrom === target.yearTo ? target.yearFrom : null;
+  await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+  const bootstrap = await waitForIaaiBootstrap(page);
+  if (bootstrap.failure === "access-denied") {
+    throw new Error(`IAAI search access denied for ${target.key}`);
+  }
+  if (bootstrap.failure === "blocked") {
+    throw new Error(`IAAI search request blocked for ${target.key}`);
+  }
+  if (bootstrap.noResults) {
+    return { records, pagesFetched, candidatesScanned };
+  }
 
-  for (let year = target.yearFrom; year <= target.yearTo; year += 1) {
-    const searchUrl = buildIaaiSearchUrl(target, year);
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-    const bootstrap = await waitForIaaiBootstrap(page);
-    if (bootstrap.failure === "access-denied") {
-      throw new Error(`IAAI search access denied for ${target.key} ${year}`);
-    }
-    if (bootstrap.failure === "blocked") {
-      throw new Error(`IAAI search request blocked for ${target.key} ${year}`);
-    }
-    if (bootstrap.noResults) {
-      continue;
-    }
+  let snapshot: IaaiSearchSnapshot | null = null;
+  try {
+    const firstPageHtml = await fetchIaaiSearchPageHtmlFromInternalApi(page, 1);
+    snapshot = await readIaaiSearchSnapshotFromHtml(page, firstPageHtml, 1);
+  } catch {
+    snapshot = null;
+  }
 
-    let snapshot: IaaiSearchSnapshot | null = null;
-    try {
-      const firstPageHtml = await fetchIaaiSearchPageHtmlFromInternalApi(page, 1);
-      snapshot = await readIaaiSearchSnapshotFromHtml(page, firstPageHtml, 1);
-    } catch {
-      snapshot = null;
+  if (!snapshot || (!snapshot.failure && !snapshot.noResults && snapshot.candidates.length === 0)) {
+    const fallbackHtml = await page.content().catch(() => "");
+    if (fallbackHtml) {
+      snapshot = await readIaaiSearchSnapshotFromHtml(page, fallbackHtml, 1);
     }
+  }
 
-    if (!snapshot || (!snapshot.failure && !snapshot.noResults && snapshot.candidates.length === 0)) {
-      const fallbackHtml = await page.content().catch(() => "");
-      if (fallbackHtml) {
-        snapshot = await readIaaiSearchSnapshotFromHtml(page, fallbackHtml, 1);
+  if (!snapshot) {
+    throw new Error(`IAAI search bootstrap produced no usable page data for ${target.key}`);
+  }
+  if (snapshot.failure === "access-denied") {
+    throw new Error(`IAAI search access denied for ${target.key}`);
+  }
+  if (snapshot.failure === "blocked") {
+    throw new Error(`IAAI search request blocked for ${target.key}`);
+  }
+  if (snapshot.noResults) {
+    return { records, pagesFetched, candidatesScanned };
+  }
+  if (snapshot.candidates.length === 0) {
+    throw new Error(`IAAI search returned no parsable listings for ${target.key} (${snapshot.title}: ${snapshot.bodyPreview})`);
+  }
+
+  const finalPage = Math.min(Math.max(snapshot.totalPages, 1), 10);
+  for (let pageNumber = 1; pageNumber <= finalPage; pageNumber += 1) {
+    if (pageNumber > 1) {
+      const html = await fetchIaaiSearchPageHtmlFromInternalApi(page, pageNumber);
+      snapshot = await readIaaiSearchSnapshotFromHtml(page, html, pageNumber);
+      if (snapshot.failure === "access-denied") {
+        throw new Error(`IAAI search access denied for ${target.key} page ${pageNumber}`);
       }
-    }
-
-    if (!snapshot) {
-      throw new Error(`IAAI search bootstrap produced no usable page data for ${target.key} ${year}`);
-    }
-    if (snapshot.failure === "access-denied") {
-      throw new Error(`IAAI search access denied for ${target.key} ${year}`);
-    }
-    if (snapshot.failure === "blocked") {
-      throw new Error(`IAAI search request blocked for ${target.key} ${year}`);
-    }
-    if (snapshot.noResults) {
-      continue;
-    }
-    if (snapshot.candidates.length === 0) {
-      throw new Error(`IAAI search returned no parsable listings for ${target.key} ${year} (${snapshot.title}: ${snapshot.bodyPreview})`);
-    }
-
-    const finalPage = Math.min(Math.max(snapshot.totalPages, 1), 10);
-    for (let pageNumber = 1; pageNumber <= finalPage; pageNumber += 1) {
-      if (pageNumber > 1) {
-        const html = await fetchIaaiSearchPageHtmlFromInternalApi(page, pageNumber);
-        snapshot = await readIaaiSearchSnapshotFromHtml(page, html, pageNumber);
-        if (snapshot.failure === "access-denied") {
-          throw new Error(`IAAI search access denied for ${target.key} ${year} page ${pageNumber}`);
-        }
-        if (snapshot.failure === "blocked") {
-          throw new Error(`IAAI search request blocked for ${target.key} ${year} page ${pageNumber}`);
-        }
-        if (snapshot.noResults || snapshot.candidates.length === 0) {
-          break;
-        }
+      if (snapshot.failure === "blocked") {
+        throw new Error(`IAAI search request blocked for ${target.key} page ${pageNumber}`);
       }
-
-      pagesFetched += 1;
-      const candidates = snapshot.candidates;
-      candidatesScanned += candidates.length;
-      let newOnPage = 0;
-      for (const candidate of candidates) {
-        if (seenUrls.has(candidate.url)) {
-          continue;
-        }
-        seenUrls.add(candidate.url);
-        newOnPage += 1;
-        const record = buildRecord("iaai", year, candidate, nowIso, target);
-        if (!record) {
-          continue;
-        }
-        records.push({ record, imageCandidates: candidate.imageCandidates });
-      }
-      if (pageNumber >= snapshot.totalPages || newOnPage === 0) {
+      if (snapshot.noResults || snapshot.candidates.length === 0) {
         break;
       }
+    }
+
+    pagesFetched += 1;
+    const candidates = snapshot.candidates;
+    candidatesScanned += candidates.length;
+    let newOnPage = 0;
+    for (const candidate of candidates) {
+      if (seenUrls.has(candidate.url)) {
+        continue;
+      }
+      seenUrls.add(candidate.url);
+      newOnPage += 1;
+      const record = buildRecord("iaai", fallbackYear, candidate, nowIso, target);
+      if (!record) {
+        continue;
+      }
+      records.push({ record, imageCandidates: candidate.imageCandidates });
+    }
+    if (pageNumber >= snapshot.totalPages || newOnPage === 0) {
+      break;
     }
   }
 
@@ -1127,6 +1217,7 @@ function buildCopartApiAuctionDate(item: any): { value: string; raw: string } {
 }
 
 function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): ScrapedRecordWithImages | null {
+  const vehicleTitle = normalizeVehicleTitle(String(item.ld || ""));
   const text = normalizeWhitespace(
     [
       item.ld,
@@ -1169,6 +1260,7 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
     vin,
     lotNumber: String(item.lotNumberStr || ""),
     sourceDetailId: null,
+    vehicleTitle,
     status,
     auctionDate: dateInfo.value,
     auctionDateRaw: dateInfo.raw,
@@ -1983,7 +2075,7 @@ async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: str
     if (index > 0) {
       await delayWithJitter(COPART_TARGET_DELAY_MS, COPART_DELAY_JITTER_MS);
     }
-    const searchUrl = `https://www.copart.com/vehicle-search-year/tesla/${target.copartSlug}/${target.yearFrom}`;
+    const searchUrl = "https://www.copart.com/vehicleFinder";
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
     const state = await waitForReadyOrCaptcha(page, "copart");
     if (state.status === "captcha") {
@@ -1992,16 +2084,17 @@ async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: str
       console.warn(`Copart captcha for ${target.key} at ${searchUrl}`);
       continue;
     }
-    if (state.status !== "ready") {
-      scope.status = "partial";
-      scope.notes = `unexpected state ${state.status}`;
-      continue;
-    }
     await delayWithJitter(COPART_READY_SETTLE_MS, COPART_DELAY_JITTER_MS);
-    const targetRecords = await fetchCopartMatches(page, target, nowIso);
-    records.push(...targetRecords);
-    scope.status = "complete";
-    scope.notes = `${targetRecords.length} records`;
+    try {
+      const targetRecords = await fetchCopartMatches(page, target, nowIso);
+      records.push(...targetRecords);
+      scope.status = "complete";
+      scope.notes = `${targetRecords.length} records${state.status === "ready" ? "" : ` (bootstrap ${state.status})`}`;
+    } catch (error) {
+      scope.status = state.status === "unknown" ? "partial" : "failed";
+      scope.notes = normalizeWhitespace(error instanceof Error ? error.message : String(error));
+      console.warn(`Copart fetch failed for ${target.key}: ${scope.notes}`);
+    }
   }
   return records;
 }
@@ -2025,7 +2118,16 @@ async function scrapeIaaiTargets(page: Page, targets: VinTarget[], nowIso: strin
   return records;
 }
 
-async function postIngest(baseUrl: string, token: string, scopes: CoveredScope[], records: ScrapedRecordWithImages[], args: RunnerArgs, startedAt: string, completedAt: string): Promise<{ runId: string }> {
+async function postIngest(
+  baseUrl: string,
+  token: string,
+  scopes: CoveredScope[],
+  records: ScrapedRecordWithImages[],
+  targetUpdates: VinTargetMetadataUpdate[],
+  args: RunnerArgs,
+  startedAt: string,
+  completedAt: string,
+): Promise<{ runId: string }> {
   const response = await fetch(`${baseUrl}/api/ingest`, {
     method: "POST",
     headers: {
@@ -2043,6 +2145,7 @@ async function postIngest(baseUrl: string, token: string, scopes: CoveredScope[]
         scopes,
       },
       records: records.map((item) => item.record),
+      targetUpdates,
     }),
   });
   if (!response.ok) {
@@ -2090,8 +2193,9 @@ async function main(): Promise<void> {
     const dedupedRecords = Array.from(
       new Map(allRecords.map((item) => [`${item.record.sourceKey}|${item.record.lotNumber}`, item])).values(),
     );
+    const targetUpdates = buildDiscoveredTargetUpdates(dedupedRecords, activeTargets);
     const completedAt = new Date().toISOString();
-    const ingestResult = await postIngest(args.baseUrl, ingestToken, scopes, dedupedRecords, args, startedAt, completedAt);
+    const ingestResult = await postIngest(args.baseUrl, ingestToken, scopes, dedupedRecords, targetUpdates, args, startedAt, completedAt);
     console.log(`Ingested ${dedupedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);
 
     await Promise.all([

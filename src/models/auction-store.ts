@@ -16,10 +16,18 @@ import type {
   ScrapedLotRecord,
   SourceKey,
   VinTarget,
+  VinTargetMetadataUpdate,
   WorkflowState,
 } from "../lib/types";
 import { extFromMimeType, normalizeWhitespace, sha256Hex } from "../lib/utils";
-import { deriveVinPrefix, inferVinTargetDefinition, normalizeVinPattern } from "../lib/vin-patterns";
+import {
+  deriveVinPrefix,
+  getVinTargetValidationError,
+  hasGenericVinTargetYearRange,
+  inferVinTargetDefinition,
+  isGenericVinTargetMetadata,
+  normalizeVinPattern,
+} from "../lib/vin-patterns";
 import { createSqliteDatabase } from "./sqlite";
 
 export interface StoreOptions {
@@ -43,6 +51,15 @@ function rowBool(value: unknown): boolean {
 
 function normalizeSourceLabel(sourceKey: SourceKey): string {
   return sourceKey === "iaai" ? "IAAI" : "Copart";
+}
+
+function buildGenericTargetMetadata(vinPattern: string): Pick<VinTarget, "label" | "carType" | "marker"> {
+  const inferred = inferVinTargetDefinition(vinPattern);
+  return {
+    label: inferred.vinPrefix || inferred.vinPattern,
+    carType: inferred.vinPrefix || inferred.vinPattern,
+    marker: `VIN · ${inferred.vinPattern}`,
+  };
 }
 
 function normalizeLotStatus(status: string | null | undefined): LotRow["status"] {
@@ -73,12 +90,22 @@ function normalizeWorkflowState(status: string | null | undefined): WorkflowStat
 
 function mapVinTarget(row: Record<string, unknown>): VinTarget {
   const vinPattern = normalizeVinPattern(String(row.vin_pattern));
+  const generic = buildGenericTargetMetadata(vinPattern);
+  const legacyGenericFallback = isGenericVinTargetMetadata({
+    label: String(row.label ?? ""),
+    carType: String(row.car_type ?? ""),
+    marker: String(row.marker ?? ""),
+    vinPattern,
+    vinPrefix: deriveVinPrefix(vinPattern),
+    copartSlug: String(row.copart_slug ?? ""),
+    iaaiPath: String(row.iaai_path ?? ""),
+  });
   return {
     id: String(row.id),
     key: String(row.key),
-    label: String(row.label),
-    carType: String(row.car_type),
-    marker: String(row.marker),
+    label: legacyGenericFallback ? generic.label : String(row.label),
+    carType: legacyGenericFallback ? generic.carType : String(row.car_type),
+    marker: legacyGenericFallback ? generic.marker : String(row.marker),
     vinPattern,
     vinPrefix: deriveVinPrefix(vinPattern),
     yearFrom: Number(row.year_from),
@@ -423,37 +450,44 @@ export class AuctionStore {
   }
 
   upsertVinTarget(input: Partial<VinTarget> & { vinPattern: string }): string {
+    const validationError = getVinTargetValidationError(input.vinPattern);
+    if (validationError) {
+      throw new Error(validationError);
+    }
     const inferred = inferVinTargetDefinition(input.vinPattern);
     if (!inferred.vinPattern) {
       throw new Error("VIN pattern is required.");
     }
-    const existing = this.db
+    const existingRow = this.db
       .query("SELECT * FROM vin_targets WHERE id = ? OR key = ? LIMIT 1")
       .get(input.id ?? "", input.key ?? inferred.key) as Record<string, unknown> | null;
+    const existing = existingRow ? mapVinTarget(existingRow) : null;
+    const generic = buildGenericTargetMetadata(inferred.vinPattern);
+    const keepExistingMetadata = existing ? !isGenericVinTargetMetadata(existing) : false;
     const now = new Date().toISOString();
-    const label = input.label ?? (inferred.modelLabel ? inferred.label : String(existing?.label ?? inferred.label));
-    const carType = input.carType ?? (inferred.modelLabel ? inferred.carType : String(existing?.car_type ?? inferred.carType));
-    const yearFrom = input.yearFrom ?? (inferred.inferredYear ?? Number(existing?.year_from ?? inferred.yearFrom));
-    const yearTo = input.yearTo ?? (inferred.inferredYear ?? Number(existing?.year_to ?? inferred.yearTo));
-    const copartSlug = input.copartSlug ?? (inferred.copartSlug || String(existing?.copart_slug ?? ""));
-    const iaaiPath = input.iaaiPath ?? (inferred.iaaiPath || String(existing?.iaai_path ?? ""));
+    const label = input.label ?? (keepExistingMetadata ? existing?.label ?? generic.label : generic.label);
+    const carType = input.carType ?? (keepExistingMetadata ? existing?.carType ?? generic.carType : generic.carType);
+    const yearFrom = input.yearFrom ?? (existing?.yearFrom ?? inferred.inferredYear ?? inferred.yearFrom);
+    const yearTo = input.yearTo ?? (existing?.yearTo ?? inferred.inferredYear ?? inferred.yearTo);
+    const copartSlug = input.copartSlug ?? (inferred.copartSlug || existing?.copartSlug || "");
+    const iaaiPath = input.iaaiPath ?? (inferred.iaaiPath || existing?.iaaiPath || "");
     const next = {
-      id: input.id ?? (existing ? String(existing.id) : randomUUID()),
-      key: input.key ?? (existing ? String(existing.key) : inferred.key),
+      id: input.id ?? (existing ? existing.id : randomUUID()),
+      key: input.key ?? (existing ? existing.key : inferred.key),
       label,
       carType,
-      marker: input.marker ?? `${label} · ${inferred.vinPattern}`,
+      marker: input.marker ?? (keepExistingMetadata ? existing?.marker ?? generic.marker : generic.marker),
       vinPattern: inferred.vinPattern,
       vinPrefix: inferred.vinPrefix,
       yearFrom,
       yearTo,
       copartSlug,
       iaaiPath,
-      enabledCopart: input.enabledCopart ?? rowBool(existing?.enabled_copart ?? 1),
-      enabledIaai: input.enabledIaai ?? rowBool(existing?.enabled_iaai ?? 1),
-      active: input.active ?? rowBool(existing?.active ?? 1),
-      sortOrder: input.sortOrder ?? Number(existing?.sort_order ?? this.getNextVinTargetSortOrder()),
-      createdAt: existing ? String(existing.created_at) : now,
+      enabledCopart: input.enabledCopart ?? (existing ? existing.enabledCopart : true),
+      enabledIaai: input.enabledIaai ?? (existing ? existing.enabledIaai : true),
+      active: input.active ?? (existing ? existing.active : true),
+      sortOrder: input.sortOrder ?? (existing ? existing.sortOrder : this.getNextVinTargetSortOrder()),
+      createdAt: existing ? existing.createdAt : now,
       updatedAt: now,
     };
 
@@ -632,6 +666,10 @@ export class AuctionStore {
     );
 
     const transaction = this.db.transaction(() => {
+      for (const update of payload.targetUpdates ?? []) {
+        this.applyTargetMetadataUpdate(update, completedAt);
+      }
+
       for (const record of payload.records) {
         const scopeKey = `${record.sourceKey}:${record.targetKey}`;
         if (!presentKeysByScope.has(scopeKey)) {
@@ -744,10 +782,76 @@ export class AuctionStore {
     return mapLotImage(this.db.query("SELECT * FROM lot_images WHERE id = ?").get(id) as Record<string, unknown>);
   }
 
+  private applyTargetMetadataUpdate(update: VinTargetMetadataUpdate, observedAt: string): void {
+    if (!update.targetKey) {
+      return;
+    }
+    const existingRow = this.db
+      .query("SELECT * FROM vin_targets WHERE key = ? LIMIT 1")
+      .get(update.targetKey) as Record<string, unknown> | null;
+    if (!existingRow) {
+      return;
+    }
+    const existing = mapVinTarget(existingRow);
+    const nextLabel = update.label?.trim();
+    const nextCarType = update.carType?.trim();
+    const nextMarker = update.marker?.trim();
+    const nextYearFrom = update.yearFrom == null ? null : Number(update.yearFrom);
+    const nextYearTo = update.yearTo == null ? null : Number(update.yearTo);
+    const shouldReplaceMetadata = isGenericVinTargetMetadata(existing) && !!nextLabel && !!nextCarType && !!nextMarker;
+    const shouldReplaceYears = hasGenericVinTargetYearRange(existing) && nextYearFrom != null && nextYearTo != null;
+
+    if (!shouldReplaceMetadata && !shouldReplaceYears) {
+      return;
+    }
+
+    this.db.query(`
+      UPDATE vin_targets
+      SET
+        label = ?,
+        car_type = ?,
+        marker = ?,
+        year_from = ?,
+        year_to = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      shouldReplaceMetadata ? nextLabel : existing.label,
+      shouldReplaceMetadata ? nextCarType : existing.carType,
+      shouldReplaceMetadata ? nextMarker : existing.marker,
+      shouldReplaceYears ? nextYearFrom : existing.yearFrom,
+      shouldReplaceYears ? nextYearTo : existing.yearTo,
+      observedAt,
+      existing.id,
+    );
+  }
+
+  private getResolvedTargetMetadata(targetKey: string | null | undefined): Pick<VinTarget, "carType" | "marker"> | null {
+    if (!targetKey) {
+      return null;
+    }
+    const row = this.db
+      .query("SELECT * FROM vin_targets WHERE key = ? LIMIT 1")
+      .get(targetKey) as Record<string, unknown> | null;
+    if (!row) {
+      return null;
+    }
+    const target = mapVinTarget(row);
+    return isGenericVinTargetMetadata(target)
+      ? null
+      : {
+          carType: target.carType,
+          marker: target.marker,
+        };
+  }
+
   private upsertLotRecord(runId: string, observedAt: string, record: ScrapedLotRecord): void {
     const existing = this.db
       .query("SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1")
       .get(record.sourceKey, record.lotNumber) as Record<string, unknown> | null;
+    const resolvedTarget = this.getResolvedTargetMetadata(record.targetKey);
+    const resolvedCarType = resolvedTarget?.carType || record.carType;
+    const resolvedMarker = resolvedTarget?.marker || record.marker;
 
     const nextStatus = normalizeLotStatus(record.status);
     if (existing) {
@@ -781,8 +885,8 @@ export class AuctionStore {
         record.sourceLabel || normalizeSourceLabel(record.sourceKey),
         record.targetKey || null,
         record.sourceDetailId ?? null,
-        record.carType,
-        record.marker,
+        resolvedCarType,
+        resolvedMarker,
         record.vinPattern || null,
         record.vin || null,
         record.modelYear ?? null,
@@ -820,8 +924,8 @@ export class AuctionStore {
       record.targetKey || null,
       record.lotNumber,
       record.sourceDetailId ?? null,
-      record.carType,
-      record.marker,
+      resolvedCarType,
+      resolvedMarker,
       record.vinPattern || null,
       record.vin || null,
       record.modelYear ?? null,

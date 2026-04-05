@@ -53,6 +53,7 @@ export interface ScrapedLotRecord {
   vin: string;
   lotNumber: string;
   sourceDetailId?: string | null;
+  vehicleTitle?: string | null;
   status: LotStatus;
   auctionDate: string;
   auctionDateRaw: string;
@@ -60,6 +61,15 @@ export interface ScrapedLotRecord {
   url: string;
   evidence: string;
   images?: ScrapedImagePayload[];
+}
+
+export interface VinTargetMetadataUpdate {
+  targetKey: string;
+  label?: string;
+  carType?: string;
+  marker?: string;
+  yearFrom?: number | null;
+  yearTo?: number | null;
 }
 
 export interface IngestRunPayload {
@@ -76,6 +86,7 @@ export interface IngestRunPayload {
 export interface IngestPayload {
   run: IngestRunPayload;
   records: ScrapedLotRecord[];
+  targetUpdates?: VinTargetMetadataUpdate[];
 }
 
 export interface LotRow {
