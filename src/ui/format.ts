@@ -62,13 +62,17 @@ export function formatAuctionDateDisplay(lot: {
   return lot.auctionDate || "";
 }
 
-export function formatGeneratedAt(generatedAt: string, nowMs: number): string {
-  const generatedMs = Date.parse(generatedAt);
-  if (Number.isNaN(generatedMs)) {
-    return generatedAt;
+export function formatRelativeTimestamp(iso: string | null | undefined, nowMs: number, emptyLabel = "No ingest yet"): string {
+  if (!iso) {
+    return emptyLabel;
   }
 
-  const minutes = Math.floor((nowMs - generatedMs) / 60000);
+  const timestampMs = Date.parse(iso);
+  if (Number.isNaN(timestampMs)) {
+    return iso;
+  }
+
+  const minutes = Math.floor((nowMs - timestampMs) / 60000);
   if (minutes < 1) {
     return "just now";
   }

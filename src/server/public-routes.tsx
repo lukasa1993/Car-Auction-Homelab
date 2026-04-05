@@ -69,8 +69,9 @@ export function handlePublicPages(
           admin: authState.admin,
           email: authState.email,
         },
-        generatedAt: new Date().toISOString(),
+        lastCollectorIngestAt: services.store.getLatestCollectorIngestAt(),
         lots: filteredLots,
+        renderedAt: new Date().toISOString(),
         tabs: modelTabs.map((tab) => ({
           key: tab.key,
           label: tab.label,

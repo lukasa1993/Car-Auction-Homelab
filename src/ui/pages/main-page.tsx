@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import {
   formatAuctionCountdown,
   formatAuctionDateDisplay,
-  formatGeneratedAt,
+  formatRelativeTimestamp,
   formatLocalAuctionTime,
   hasExactAuctionTime,
   stripTeslaPrefix,
@@ -23,7 +23,8 @@ export interface MainPageTab {
 export interface MainPageProps {
   lots: LotListItem[];
   allLots: LotListItem[];
-  generatedAt: string;
+  lastCollectorIngestAt: string | null;
+  renderedAt: string;
   activeTab: string;
   tabs: MainPageTab[];
   auth: { signedIn: boolean; admin: boolean; email: string | null };
@@ -154,14 +155,15 @@ function LotRowActions({
 export function MainPage({
   lots,
   allLots,
-  generatedAt,
+  lastCollectorIngestAt,
+  renderedAt,
   activeTab,
   tabs,
   auth,
 }: MainPageProps) {
   const [allLotsState, setAllLotsState] = React.useState(allLots);
   const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
-  const [nowMs, setNowMs] = React.useState(() => Date.parse(generatedAt) || Date.now());
+  const [nowMs, setNowMs] = React.useState(() => Date.parse(renderedAt) || Date.now());
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -187,7 +189,7 @@ export function MainPage({
         <header className="flex items-baseline justify-between gap-3">
           <div className="flex items-baseline gap-2">
             <h1 className="text-base font-semibold">Auction Monitor</h1>
-            <span className="text-[12px] text-muted-foreground">{formatGeneratedAt(generatedAt, nowMs)}</span>
+            <span className="text-[12px] text-muted-foreground">{formatRelativeTimestamp(lastCollectorIngestAt, nowMs)}</span>
           </div>
           {auth.admin ? (
             <a

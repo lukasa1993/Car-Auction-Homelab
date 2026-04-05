@@ -447,6 +447,22 @@ export class AuctionStore {
     };
   }
 
+  getLatestCollectorIngestAt(): string | null {
+    const runRow = this.db.query(`
+      SELECT MAX(COALESCE(completed_at, started_at, submitted_at)) AS ingested_at
+      FROM sync_runs
+      WHERE status = 'complete'
+    `).get() as { ingested_at?: string | null } | null;
+    if (runRow?.ingested_at) {
+      return String(runRow.ingested_at);
+    }
+
+    const lotRow = this.db.query("SELECT MAX(last_ingested_at) AS ingested_at FROM lots").get() as {
+      ingested_at?: string | null;
+    } | null;
+    return lotRow?.ingested_at ? String(lotRow.ingested_at) : null;
+  }
+
   private getNextVinTargetSortOrder(): number {
     const row = this.db.query("SELECT COALESCE(MAX(sort_order), 0) AS sort_order FROM vin_targets").get() as {
       sort_order?: number | null;
