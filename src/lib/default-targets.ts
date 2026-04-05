@@ -42,7 +42,7 @@ export const DEFAULT_TARGETS = [
     2020,
     2023,
     "model-3",
-    "Model%203",
+    "Model 3",
     10,
   ),
   buildTarget(
@@ -54,7 +54,7 @@ export const DEFAULT_TARGETS = [
     2024,
     2027,
     "model-3",
-    "Model%203",
+    "Model 3",
     20,
   ),
   buildTarget(
@@ -66,7 +66,7 @@ export const DEFAULT_TARGETS = [
     2024,
     2027,
     "model-y",
-    "Model%20Y",
+    "Model Y",
     30,
   ),
   buildTarget(
@@ -78,7 +78,7 @@ export const DEFAULT_TARGETS = [
     2024,
     2027,
     "model-y",
-    "Model%20Y",
+    "Model Y",
     40,
   ),
   buildTarget(
@@ -90,7 +90,7 @@ export const DEFAULT_TARGETS = [
     2024,
     2027,
     "model-y",
-    "Model%20Y",
+    "Model Y",
     50,
   ),
   buildTarget(
@@ -102,7 +102,7 @@ export const DEFAULT_TARGETS = [
     2024,
     2027,
     "model-y",
-    "Model%20Y",
+    "Model Y",
     60,
   ),
 ];

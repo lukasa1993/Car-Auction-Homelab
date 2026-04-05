@@ -518,7 +518,8 @@ async function fetchScrapeConfig(baseUrl: string, token: string): Promise<{ conf
 
 function buildIaaiSearchUrl(target: VinTarget, year: number): string {
   const base = "https://auctiondata.iaai.com/Search?keyword=";
-  return `${base}${encodeURIComponent(`${year} Tesla ${target.iaaiPath}`)}&bu=Vehicles`;
+  const modelTerm = decodeIaaiSearchTerm(target.iaaiPath);
+  return `${base}${encodeURIComponent(`${year} Tesla ${modelTerm}`)}&bu=Vehicles`;
 }
 
 async function fetchIaaiSearchPageHtml(target: VinTarget, year: number, pageNumber: number): Promise<{ html: string; searchUrl: string }> {
@@ -538,6 +539,32 @@ async function fetchIaaiSearchPageHtml(target: VinTarget, year: number, pageNumb
 
 function isIaaiEmptyResultsPage(html: string): boolean {
   return /<h2>\s*No Results Found\s*<\/h2>/i.test(html) || /id="hdnTotalvehicles" value="0"/i.test(html);
+}
+
+function decodeIaaiSearchTerm(value: string): string {
+  const trimmed = normalizeWhitespace(String(value || ""));
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    return normalizeWhitespace(decodeURIComponent(trimmed));
+  } catch {
+    return trimmed;
+  }
+}
+
+function getIaaiSearchFailure(html: string): "access-denied" | "blocked" | null {
+  if (
+    /SearchPlugin\/NoAccess/i.test(html) ||
+    /<title>\s*NoAccess\s*<\/title>/i.test(html) ||
+    /This content cannot be displayed because of an issue between the page administrator and the content provider\./i.test(html)
+  ) {
+    return "access-denied";
+  }
+  if (/Request unsuccessful|Incapsula incident id|sorry, you have been blocked|_Incapsula_Resource/i.test(html)) {
+    return "blocked";
+  }
+  return null;
 }
 
 function extractIaaiCandidatesFromHtml(html: string): Array<{ text: string; url: string }> {
@@ -570,10 +597,11 @@ async function fetchIaaiDirectMatches(target: VinTarget, nowIso: string): Promis
     for (let pageNumber = 1; pageNumber <= 10; pageNumber += 1) {
       const { html } = await fetchIaaiSearchPageHtml(target, year, pageNumber);
       pagesFetched += 1;
-      if (/SearchPlugin\/NoAccess/i.test(html)) {
+      const failure = getIaaiSearchFailure(html);
+      if (failure === "access-denied") {
         throw new Error(`IAAI auctiondata access denied for ${target.key} ${year}`);
       }
-      if (/Request unsuccessful|Incapsula incident id/i.test(html)) {
+      if (failure === "blocked") {
         throw new Error(`IAAI auctiondata request blocked for ${target.key} ${year}`);
       }
       const candidates = extractIaaiCandidatesFromHtml(html);
@@ -583,7 +611,8 @@ async function fetchIaaiDirectMatches(target: VinTarget, nowIso: string): Promis
           break;
         }
         if (pageNumber === 1) {
-          throw new Error(`IAAI search returned no parsable listings for ${target.key} ${year}`);
+          const preview = normalizeWhitespace(stripHtml(html)).slice(0, 160);
+          throw new Error(`IAAI search returned no parsable listings for ${target.key} ${year}${preview ? ` (${preview})` : ""}`);
         }
         break;
       }

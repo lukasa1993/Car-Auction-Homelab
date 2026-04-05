@@ -205,6 +205,15 @@ AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f depl
 AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/auction/compose.yml up -d
 ```
 
+The Compose service sets `container_name: auction` and opts into Watchtower with the label `com.centurylinklabs.watchtower.enable=true`. If the Mac mini runs Watchtower with label filtering enabled, this is the container name and label it should match.
+
+Quick verification on the auction host:
+
+```bash
+docker ps --filter name=^auction$ --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+docker inspect auction --format '{{json .Config.Labels}}'
+```
+
 By default the Compose file uses:
 
 ```text

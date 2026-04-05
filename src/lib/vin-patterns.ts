@@ -7,25 +7,25 @@ const TESLA_MODEL_BY_CODE = {
     label: "Model 3",
     carType: "Tesla Model 3",
     copartSlug: "model-3",
-    iaaiPath: "Model%203",
+    iaaiPath: "Model 3",
   },
   S: {
     label: "Model S",
     carType: "Tesla Model S",
     copartSlug: "model-s",
-    iaaiPath: "Model%20S",
+    iaaiPath: "Model S",
   },
   X: {
     label: "Model X",
     carType: "Tesla Model X",
     copartSlug: "model-x",
-    iaaiPath: "Model%20X",
+    iaaiPath: "Model X",
   },
   Y: {
     label: "Model Y",
     carType: "Tesla Model Y",
     copartSlug: "model-y",
-    iaaiPath: "Model%20Y",
+    iaaiPath: "Model Y",
   },
 } as const;
 
