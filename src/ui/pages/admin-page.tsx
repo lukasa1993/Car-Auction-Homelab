@@ -1,8 +1,9 @@
 import * as React from "react";
-import { ArrowLeft, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import type { VinTarget } from "../../lib/types";
 import { isGenericVinTargetMetadata } from "../../lib/vin-patterns";
+import { AdminHeader } from "../components/admin-header";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/card";
@@ -94,24 +95,19 @@ export function AdminPage({
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-[1120px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <a href="/">
-              <Button size="sm" variant="outline"><ArrowLeft className="size-3.5" /> Back</Button>
-            </a>
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Admin registry</div>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight">VIN family targets</h1>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+        <AdminHeader
+          actions={
             <a href="/admin/history">
-              <Button size="sm" variant="outline">History{historyCount ? ` (${historyCount})` : ""}</Button>
+              <Button size="sm" variant="outline">
+                History{historyCount ? ` (${historyCount})` : ""}
+              </Button>
             </a>
-            <Badge variant="success">Admin</Badge>
-            <span className="text-sm text-muted-foreground">{email}</span>
-          </div>
-        </header>
+          }
+          backHref="/"
+          email={email}
+          eyebrow="Admin registry"
+          title="VIN family targets"
+        />
 
         {error ? (
           <div className="rounded-[24px] border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">
