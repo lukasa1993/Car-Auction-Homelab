@@ -2,7 +2,7 @@
   "name": "lnh-auction-collector",
   "private": true,
   "type": "module",
-  "version": "2026.04.04.1",
+  "version": "2026.04.05.1",
   "scripts": {
     "build": "bun run build.ts",
     "bootstrap": "bun run build && bun ./dist/bootstrap.js",

@@ -87,6 +87,12 @@ const RUNNER_VERSION = String(packageJson.version || "0.1.0");
 const DEFAULT_HTTP_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
 const MAX_IMAGE_FETCH_ATTEMPTS = 4;
+const IMAGE_UPLOAD_CONCURRENCY = 4;
+const LIST_PHASE_STAGGER_MS = 500;
+const COPART_TARGET_DELAY_MS = 2500;
+const COPART_READY_SETTLE_MS = 1500;
+const COPART_API_PAGE_DELAY_MS = 1250;
+const COPART_DELAY_JITTER_MS = 750;
 const MIN_HD_LONG_EDGE = 1024;
 const MIN_HD_SHORT_EDGE = 720;
 
@@ -224,10 +230,19 @@ function parseArgs(argv: string[]): RunnerArgs {
         : process.env.AUCTION_COLLECTOR_UPDATE_BASE_URL || `${baseUrl}/collector/runtime`
     ).replace(/\/$/, ""),
     siteKeys: [...siteKeys],
-    headless: argv.includes("--headless") || argv.includes("--unattended"),
-    unattended: argv.includes("--unattended"),
+    headless: false,
+    unattended: false,
     machineName: process.env.AUCTION_MACHINE_NAME || os.hostname(),
   };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function delayWithJitter(baseMs: number, jitterMs: number): Promise<void> {
+  const jitter = jitterMs > 0 ? Math.floor(Math.random() * jitterMs) : 0;
+  await delay(baseMs + jitter);
 }
 
 function getLuxonZone(zone: string | null | undefined): string {
@@ -529,28 +544,9 @@ async function fetchScrapeConfig(baseUrl: string, token: string): Promise<{ conf
 }
 
 function buildIaaiSearchUrl(target: VinTarget, year: number): string {
-  const base = "https://auctiondata.iaai.com/Search?keyword=";
+  const base = "https://www.iaai.com/Search?keyword=";
   const modelTerm = decodeIaaiSearchTerm(target.iaaiPath);
-  return `${base}${encodeURIComponent(`${year} Tesla ${modelTerm}`)}&bu=Vehicles`;
-}
-
-async function fetchIaaiSearchPageHtml(target: VinTarget, year: number, pageNumber: number): Promise<{ html: string; searchUrl: string }> {
-  const searchUrl = buildIaaiSearchUrl(target, year);
-  if (pageNumber === 1) {
-    return { html: await fetchText(searchUrl), searchUrl };
-  }
-  const html = await fetchText("https://auctiondata.iaai.com/SearchPlugin/GetScrollList", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: `{URL:'${searchUrl}',currentPage:${pageNumber}}`,
-  });
-  return { html, searchUrl };
-}
-
-function isIaaiEmptyResultsPage(html: string): boolean {
-  return /<h2>\s*No Results Found\s*<\/h2>/i.test(html) || /id="hdnTotalvehicles" value="0"/i.test(html);
+  return `${base}${encodeURIComponent(`${year} Tesla ${modelTerm}`)}`;
 }
 
 function decodeIaaiSearchTerm(value: string): string {
@@ -565,69 +561,409 @@ function decodeIaaiSearchTerm(value: string): string {
   }
 }
 
-function getIaaiSearchFailure(html: string): "access-denied" | "blocked" | null {
-  if (
-    /SearchPlugin\/NoAccess/i.test(html) ||
-    /<title>\s*NoAccess\s*<\/title>/i.test(html) ||
-    /This content cannot be displayed because of an issue between the page administrator and the content provider\./i.test(html)
-  ) {
-    return "access-denied";
-  }
-  if (/Request unsuccessful|Incapsula incident id|sorry, you have been blocked|_Incapsula_Resource/i.test(html)) {
-    return "blocked";
-  }
-  return null;
+interface IaaiSearchCandidate {
+  text: string;
+  url: string;
+  imageCandidates: string[];
 }
 
-function extractIaaiCandidatesFromHtml(html: string): Array<{ text: string; url: string }> {
-  const candidates: Array<{ text: string; url: string }> = [];
-  const seen = new Set<string>();
-  const pattern =
-    /<h4 class="truncate"><a[^>]+href="(https:\/\/www\.iaai\.com\/VehicleDetail\/\d+~US)">([^<]+)<\/a><\/h4>([\s\S]*?)<div><a[^>]+href="\1">More Details<\/a>/gi;
-  for (const match of html.matchAll(pattern)) {
-    const url = decodeHtmlEntities(match[1]);
-    const title = stripHtml(match[2]);
-    const body = stripHtml(match[3]);
-    const text = normalizeWhitespace(`${title} ${body}`);
-    const key = `${url}|${text.slice(0, 300)}`;
-    if (!url || !text || seen.has(key)) {
-      continue;
+interface IaaiSearchSnapshot {
+  title: string;
+  bodyPreview: string;
+  failure: "access-denied" | "blocked" | null;
+  noResults: boolean;
+  currentPage: number;
+  totalPages: number;
+  resultCount: number;
+  candidates: IaaiSearchCandidate[];
+}
+
+async function readIaaiSearchSnapshot(page: Page): Promise<IaaiSearchSnapshot> {
+  await dismissBanners(page);
+  return await page.evaluate(() => {
+    const normalize = (value: string | null | undefined) => String(value || "").replace(/\s+/g, " ").trim();
+    const readTitleValue = (root: ParentNode, prefix: string) =>
+      normalize(root.querySelector<HTMLElement>(`[title^="${prefix}"]`)?.textContent);
+    const bodyText = normalize(document.body?.innerText || "");
+    const lower = bodyText.toLowerCase();
+    const title = document.title;
+    const searchHistory = document.querySelector<HTMLElement>("#searchHistory");
+    const currentPageInput = document.querySelector<HTMLInputElement>("#CurrentPage");
+    const pageSizeInput = document.querySelector<HTMLInputElement>("#PageSize");
+    const currentPage = Number(searchHistory?.dataset.currentpage || currentPageInput?.value || 1);
+    const resultCount = Number(searchHistory?.dataset.resultcount || 0);
+    const pageSize = Number(searchHistory?.dataset.pagesize || pageSizeInput?.value || 100);
+    const totalPages = resultCount > 0 && pageSize > 0 ? Math.ceil(resultCount / pageSize) : 0;
+    let failure: "access-denied" | "blocked" | null = null;
+    if (
+      /noaccess/i.test(title) ||
+      lower.includes("this content cannot be displayed because of an issue between the page administrator and the content provider")
+    ) {
+      failure = "access-denied";
+    } else if (
+      lower.includes("request unsuccessful") ||
+      lower.includes("incapsula incident id") ||
+      lower.includes("sorry, you have been blocked")
+    ) {
+      failure = "blocked";
     }
-    seen.add(key);
-    candidates.push({ text, url });
-  }
-  return candidates;
+
+    const candidates: IaaiSearchCandidate[] = [];
+    const seenUrls = new Set<string>();
+    for (const block of Array.from(document.querySelectorAll<HTMLElement>(".table-row.table-row-border"))) {
+      const titleLink = block.querySelector<HTMLAnchorElement>('h4 a[href*="/VehicleDetail/"]');
+      if (!titleLink) {
+        continue;
+      }
+      const href = titleLink.getAttribute("href") || "";
+      const url = href ? new URL(href, window.location.origin).toString() : "";
+      if (!url || seenUrls.has(url)) {
+        continue;
+      }
+      seenUrls.add(url);
+
+      const stockNumber = readTitleValue(block, "Stock #:");
+      const saleDoc = readTitleValue(block, "Title/Sale Doc:");
+      const primaryDamage = readTitleValue(block, "Primary Damage:");
+      const secondaryDamage = readTitleValue(block, "Secondary Damage:");
+      const lossType = readTitleValue(block, "Loss:");
+      const odometer = readTitleValue(block, "Odometer:");
+      const startCode = readTitleValue(block, "Start Code:");
+      const airbags = readTitleValue(block, "Airbags:");
+      const keyState = readTitleValue(block, "Key :") || readTitleValue(block, "Key:");
+      const engine = readTitleValue(block, "Engine:");
+      const fuelType = readTitleValue(block, "Fuel Type:");
+      const transmission = readTitleValue(block, "Transmission:");
+      const driveline = readTitleValue(block, "Driveline Type:");
+      const market = readTitleValue(block, "Market:");
+      const acv = readTitleValue(block, "ACV:");
+      const vin = normalize(block.querySelector<HTMLElement>('[id^="VIN-"]')?.textContent);
+      const branch = normalize(block.querySelector<HTMLElement>('a[aria-label="Branch Name"]')?.textContent);
+      const vehicleLocation = normalize(block.querySelector<HTMLElement>('.text-md[title^="Vehicle Location:"]')?.textContent);
+      const auctionDate = normalize(
+        block.querySelector<HTMLElement>(".data-list--action .data-list__item:first-child .data-list__value--action")?.textContent,
+      );
+      const actionTexts = Array.from(block.querySelectorAll<HTMLElement>(".data-list--action a, .data-list--action .data-list__value--action"))
+        .map((element) => normalize(element.textContent))
+        .filter(Boolean);
+      const imageCandidates = Array.from(
+        new Set(
+          [block.querySelector<HTMLImageElement>("img[data-src]")?.getAttribute("data-src"), block.querySelector<HTMLImageElement>("img[src]")?.getAttribute("src")]
+            .map((value) => (value ? new URL(value, window.location.origin).toString() : ""))
+            .filter(Boolean),
+        ),
+      );
+
+      const text = normalize(
+        [
+          normalize(titleLink.textContent),
+          stockNumber ? `Stock #: ${stockNumber}` : "",
+          saleDoc ? `Title/Sale Doc: ${saleDoc}` : "",
+          primaryDamage ? `Primary Damage: ${primaryDamage}` : "",
+          secondaryDamage ? `Secondary Damage: ${secondaryDamage}` : "",
+          lossType ? `Loss: ${lossType}` : "",
+          odometer ? `Odometer: ${odometer}` : "",
+          startCode ? `Start Code: ${startCode}` : "",
+          airbags ? `Airbags: ${airbags}` : "",
+          keyState ? `Key: ${keyState}` : "",
+          engine ? `Engine: ${engine}` : "",
+          fuelType ? `Fuel Type: ${fuelType}` : "",
+          transmission ? `Transmission: ${transmission}` : "",
+          driveline ? `Driveline Type: ${driveline}` : "",
+          vin ? `VIN:${vin}` : "",
+          branch ? `Branch: ${branch}` : "",
+          vehicleLocation ? `Location: ${vehicleLocation}` : "",
+          market ? `Market: ${market}` : "",
+          acv ? `ACV: ${acv}` : "",
+          auctionDate ? `Auction: ${auctionDate}` : "",
+          ...actionTexts,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+      if (!text) {
+        continue;
+      }
+      candidates.push({ text, url, imageCandidates });
+    }
+
+    return {
+      title,
+      bodyPreview: bodyText.slice(0, 500),
+      failure,
+      noResults:
+        lower.includes("no items found for the search criteria specified") ||
+        (!!searchHistory && resultCount === 0 && candidates.length === 0),
+      currentPage,
+      totalPages,
+      resultCount,
+      candidates,
+    };
+  });
 }
 
-async function fetchIaaiDirectMatches(target: VinTarget, nowIso: string): Promise<{ records: ScrapedRecordWithImages[]; pagesFetched: number; candidatesScanned: number }> {
+async function waitForIaaiSearchSnapshot(page: Page, expectedPage: number, timeoutMs = 20000): Promise<IaaiSearchSnapshot> {
+  const startedAt = Date.now();
+  let snapshot = await readIaaiSearchSnapshot(page);
+  while (Date.now() - startedAt < timeoutMs) {
+    if (snapshot.failure) {
+      return snapshot;
+    }
+    if (snapshot.currentPage === expectedPage && (snapshot.noResults || snapshot.candidates.length > 0)) {
+      return snapshot;
+    }
+    await page.waitForTimeout(500);
+    snapshot = await readIaaiSearchSnapshot(page);
+  }
+  return snapshot;
+}
+
+async function buildIaaiSearchRequestPayload(page: Page, pageNumber: number): Promise<Record<string, unknown>> {
+  return await page.evaluate((requestedPage) => {
+    const parseJson = (value: string | null | undefined) => {
+      if (!value) {
+        return null;
+      }
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    };
+    const gbpSearchQuery = parseJson((document.querySelector<HTMLInputElement>("#GBPSearchQuery")?.value || "").trim()) as {
+      Searches?: Array<{ Facets?: unknown; FullSearch?: string; LongRanges?: unknown; LongDiscretes?: unknown }>;
+      ZipCode?: string | null;
+      Miles?: number | null;
+      ShowRecommendations?: boolean | null;
+      Sort?: Array<{ IsGeoSort?: boolean; SortField?: string; IsDescending?: boolean; UseUserIndex?: boolean; ForAnalytics?: boolean }>;
+      PageSize?: number | null;
+    } | null;
+    const searchesScript = parseJson((document.querySelector<HTMLScriptElement>("#Searches")?.textContent || "").trim()) as
+      | Array<{ Facets?: unknown; FullSearch?: string; LongRanges?: unknown; LongDiscretes?: unknown }>
+      | null;
+    const searches = (gbpSearchQuery?.Searches || searchesScript || [])
+      .map((entry) => ({
+        Facets: entry?.Facets ?? null,
+        FullSearch: String(entry?.FullSearch || "").trim(),
+        LongRanges: entry?.LongRanges ?? null,
+        LongDiscretes: entry?.LongDiscretes ?? null,
+      }))
+      .filter((entry) => entry.FullSearch);
+    const pageSize = Number(document.querySelector<HTMLInputElement>("#PageSize")?.value || gbpSearchQuery?.PageSize || 100);
+    const sort = Array.isArray(gbpSearchQuery?.Sort) && gbpSearchQuery.Sort.length > 0
+      ? gbpSearchQuery.Sort
+      : [{ IsGeoSort: false, SortField: "AuctionDateTime", IsDescending: false }];
+    return {
+      Searches: searches,
+      ZipCode: String(gbpSearchQuery?.ZipCode || ""),
+      miles: Number(gbpSearchQuery?.Miles || 0),
+      PageSize: Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100,
+      CurrentPage: requestedPage,
+      Sort: sort.map((entry) => ({
+        IsGeoSort: !!entry?.IsGeoSort,
+        SortField: String(entry?.SortField || "AuctionDateTime"),
+        IsDescending: !!entry?.IsDescending,
+        UseUserIndex: !!entry?.UseUserIndex,
+        ForAnalytics: !!entry?.ForAnalytics,
+      })),
+      ShowRecommendations: !!gbpSearchQuery?.ShowRecommendations,
+      SaleStatusFilters: [{ SaleStatus: 1, IsSelected: true }],
+      BidStatusFilters: [{ BidStatus: 6, IsSelected: true }],
+    };
+  }, pageNumber);
+}
+
+async function fetchIaaiSearchPageHtmlFromInternalApi(page: Page, pageNumber: number): Promise<string> {
+  const payload = await buildIaaiSearchRequestPayload(page, pageNumber);
+  const response = await page.evaluate(async ({ body, timestamp }) => {
+    const result = await fetch(`/Search?c=${timestamp}`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json; charset=UTF-8",
+        "x-requested-with": "XMLHttpRequest",
+      },
+      body: JSON.stringify(body),
+    });
+    return {
+      ok: result.ok,
+      status: result.status,
+      text: await result.text(),
+    };
+  }, { body: payload, timestamp: Date.now() });
+  if (!response.ok) {
+    throw new Error(`IAAI internal search request failed with HTTP ${response.status} for page ${pageNumber}`);
+  }
+  return response.text;
+}
+
+async function readIaaiSearchSnapshotFromHtml(page: Page, html: string, fallbackPageNumber: number): Promise<IaaiSearchSnapshot> {
+  return await page.evaluate(({ html, fallbackPageNumber }) => {
+    const normalize = (value: string | null | undefined) => String(value || "").replace(/\s+/g, " ").trim();
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const root = template.content;
+    const readTitleValue = (node: ParentNode, prefix: string) =>
+      normalize(node.querySelector<HTMLElement>(`[title^="${prefix}"]`)?.textContent);
+    const bodyText = normalize((root.textContent || "").trim());
+    const lower = bodyText.toLowerCase();
+    const title = normalize(root.querySelector("title")?.textContent) || document.title;
+    const searchHistory = root.querySelector<HTMLElement>("#searchHistory");
+    const currentPageInput = root.querySelector<HTMLInputElement>("#CurrentPage");
+    const pageSizeInput = root.querySelector<HTMLInputElement>("#PageSize");
+    const currentPage = Number(searchHistory?.dataset.currentpage || currentPageInput?.value || fallbackPageNumber);
+    const resultCount = Number(searchHistory?.dataset.resultcount || 0);
+    const pageSize = Number(searchHistory?.dataset.pagesize || pageSizeInput?.value || 100);
+    const totalPages = resultCount > 0 && pageSize > 0 ? Math.ceil(resultCount / pageSize) : 0;
+    let failure: "access-denied" | "blocked" | null = null;
+    if (
+      /noaccess/i.test(title) ||
+      lower.includes("this content cannot be displayed because of an issue between the page administrator and the content provider")
+    ) {
+      failure = "access-denied";
+    } else if (
+      lower.includes("request unsuccessful") ||
+      lower.includes("incapsula incident id") ||
+      lower.includes("sorry, you have been blocked")
+    ) {
+      failure = "blocked";
+    }
+
+    const candidates: IaaiSearchCandidate[] = [];
+    const seenUrls = new Set<string>();
+    for (const block of Array.from(root.querySelectorAll<HTMLElement>(".table-row.table-row-border"))) {
+      const titleLink = block.querySelector<HTMLAnchorElement>('h4 a[href*="/VehicleDetail/"]');
+      if (!titleLink) {
+        continue;
+      }
+      const href = titleLink.getAttribute("href") || "";
+      const url = href ? new URL(href, window.location.origin).toString() : "";
+      if (!url || seenUrls.has(url)) {
+        continue;
+      }
+      seenUrls.add(url);
+
+      const stockNumber = readTitleValue(block, "Stock #:");
+      const saleDoc = readTitleValue(block, "Title/Sale Doc:");
+      const primaryDamage = readTitleValue(block, "Primary Damage:");
+      const secondaryDamage = readTitleValue(block, "Secondary Damage:");
+      const lossType = readTitleValue(block, "Loss:");
+      const odometer = readTitleValue(block, "Odometer:");
+      const startCode = readTitleValue(block, "Start Code:");
+      const airbags = readTitleValue(block, "Airbags:");
+      const keyState = readTitleValue(block, "Key :") || readTitleValue(block, "Key:");
+      const engine = readTitleValue(block, "Engine:");
+      const fuelType = readTitleValue(block, "Fuel Type:");
+      const transmission = readTitleValue(block, "Transmission:");
+      const driveline = readTitleValue(block, "Driveline Type:");
+      const market = readTitleValue(block, "Market:");
+      const acv = readTitleValue(block, "ACV:");
+      const vin = normalize(block.querySelector<HTMLElement>('[id^="VIN-"]')?.textContent);
+      const branch = normalize(block.querySelector<HTMLElement>('a[aria-label="Branch Name"]')?.textContent);
+      const vehicleLocation = normalize(block.querySelector<HTMLElement>('.text-md[title^="Vehicle Location:"]')?.textContent);
+      const auctionDate = normalize(
+        block.querySelector<HTMLElement>(".data-list--action .data-list__item:first-child .data-list__value--action")?.textContent,
+      );
+      const actionTexts = Array.from(block.querySelectorAll<HTMLElement>(".data-list--action a, .data-list--action .data-list__value--action"))
+        .map((element) => normalize(element.textContent))
+        .filter(Boolean);
+      const imageCandidates = Array.from(
+        new Set(
+          [block.querySelector<HTMLImageElement>("img[data-src]")?.getAttribute("data-src"), block.querySelector<HTMLImageElement>("img[src]")?.getAttribute("src")]
+            .map((value) => (value ? new URL(value, window.location.origin).toString() : ""))
+            .filter(Boolean),
+        ),
+      );
+      const text = normalize(
+        [
+          normalize(titleLink.textContent),
+          stockNumber ? `Stock #: ${stockNumber}` : "",
+          saleDoc ? `Title/Sale Doc: ${saleDoc}` : "",
+          primaryDamage ? `Primary Damage: ${primaryDamage}` : "",
+          secondaryDamage ? `Secondary Damage: ${secondaryDamage}` : "",
+          lossType ? `Loss: ${lossType}` : "",
+          odometer ? `Odometer: ${odometer}` : "",
+          startCode ? `Start Code: ${startCode}` : "",
+          airbags ? `Airbags: ${airbags}` : "",
+          keyState ? `Key: ${keyState}` : "",
+          engine ? `Engine: ${engine}` : "",
+          fuelType ? `Fuel Type: ${fuelType}` : "",
+          transmission ? `Transmission: ${transmission}` : "",
+          driveline ? `Driveline Type: ${driveline}` : "",
+          vin ? `VIN:${vin}` : "",
+          branch ? `Branch: ${branch}` : "",
+          vehicleLocation ? `Location: ${vehicleLocation}` : "",
+          market ? `Market: ${market}` : "",
+          acv ? `ACV: ${acv}` : "",
+          auctionDate ? `Auction: ${auctionDate}` : "",
+          ...actionTexts,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+      if (!text) {
+        continue;
+      }
+      candidates.push({ text, url, imageCandidates });
+    }
+
+    return {
+      title,
+      bodyPreview: bodyText.slice(0, 500),
+      failure,
+      noResults:
+        lower.includes("no items found for the search criteria specified") ||
+        (!!searchHistory && resultCount === 0 && candidates.length === 0),
+      currentPage,
+      totalPages,
+      resultCount,
+      candidates,
+    };
+  }, { html, fallbackPageNumber });
+}
+
+async function fetchIaaiDirectMatches(page: Page, target: VinTarget, nowIso: string): Promise<{ records: ScrapedRecordWithImages[]; pagesFetched: number; candidatesScanned: number }> {
   const records: ScrapedRecordWithImages[] = [];
   const seenUrls = new Set<string>();
   let pagesFetched = 0;
   let candidatesScanned = 0;
 
   for (let year = target.yearFrom; year <= target.yearTo; year += 1) {
-    for (let pageNumber = 1; pageNumber <= 10; pageNumber += 1) {
-      const { html } = await fetchIaaiSearchPageHtml(target, year, pageNumber);
-      pagesFetched += 1;
-      const failure = getIaaiSearchFailure(html);
-      if (failure === "access-denied") {
-        throw new Error(`IAAI auctiondata access denied for ${target.key} ${year}`);
-      }
-      if (failure === "blocked") {
-        throw new Error(`IAAI auctiondata request blocked for ${target.key} ${year}`);
-      }
-      const candidates = extractIaaiCandidatesFromHtml(html);
-      candidatesScanned += candidates.length;
-      if (candidates.length === 0) {
-        if (pageNumber === 1 && isIaaiEmptyResultsPage(html)) {
+    const searchUrl = buildIaaiSearchUrl(target, year);
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+    let snapshot = await waitForIaaiSearchSnapshot(page, 1);
+    if (snapshot.failure === "access-denied") {
+      throw new Error(`IAAI search access denied for ${target.key} ${year}`);
+    }
+    if (snapshot.failure === "blocked") {
+      throw new Error(`IAAI search request blocked for ${target.key} ${year}`);
+    }
+    if (snapshot.noResults) {
+      continue;
+    }
+    if (snapshot.candidates.length === 0) {
+      throw new Error(`IAAI search returned no parsable listings for ${target.key} ${year} (${snapshot.title}: ${snapshot.bodyPreview})`);
+    }
+
+    const finalPage = Math.min(Math.max(snapshot.totalPages, 1), 10);
+    for (let pageNumber = 1; pageNumber <= finalPage; pageNumber += 1) {
+      if (pageNumber > 1) {
+        const html = await fetchIaaiSearchPageHtmlFromInternalApi(page, pageNumber);
+        snapshot = await readIaaiSearchSnapshotFromHtml(page, html, pageNumber);
+        if (snapshot.failure === "access-denied") {
+          throw new Error(`IAAI search access denied for ${target.key} ${year} page ${pageNumber}`);
+        }
+        if (snapshot.failure === "blocked") {
+          throw new Error(`IAAI search request blocked for ${target.key} ${year} page ${pageNumber}`);
+        }
+        if (snapshot.noResults || snapshot.candidates.length === 0) {
           break;
         }
-        if (pageNumber === 1) {
-          const preview = normalizeWhitespace(stripHtml(html)).slice(0, 160);
-          throw new Error(`IAAI search returned no parsable listings for ${target.key} ${year}${preview ? ` (${preview})` : ""}`);
-        }
-        break;
       }
+
+      pagesFetched += 1;
+      const candidates = snapshot.candidates;
+      candidatesScanned += candidates.length;
       let newOnPage = 0;
       for (const candidate of candidates) {
         if (seenUrls.has(candidate.url)) {
@@ -639,9 +975,9 @@ async function fetchIaaiDirectMatches(target: VinTarget, nowIso: string): Promis
         if (!record) {
           continue;
         }
-        records.push({ record, imageCandidates: [] });
+        records.push({ record, imageCandidates: candidate.imageCandidates });
       }
-      if (candidates.length < 100 || newOnPage === 0) {
+      if (pageNumber >= snapshot.totalPages || newOnPage === 0) {
         break;
       }
     }
@@ -767,13 +1103,7 @@ async function fetchCopartApiPage(page: Page, vinPrefix: string, pageIndex: numb
 function collectImageUrlsFromValue(value: unknown, results: Set<string>, baseOrigin: string, keyHint = ""): void {
   if (typeof value === "string") {
     const trimmed = value.trim();
-    const normalizedKeyHint = keyHint.toLowerCase();
-    const looksLikeImage =
-      /(image|img|thumb|photo|hero|gallery|iconurl|full|preview|url)/i.test(normalizedKeyHint) ||
-      /\.(?:jpe?g|png|webp|avif|gif)(?:[?#].*)?$/i.test(trimmed) ||
-      /\/image/i.test(trimmed) ||
-      (/^https?:\/\//i.test(trimmed) && /(copart|iaai|auction)/i.test(trimmed) && /(cdn-cgi\/image|media|thumb|photo|img)/i.test(trimmed));
-    if (!looksLikeImage) {
+    if (!isLikelyImageCandidate(trimmed, keyHint)) {
       return;
     }
     try {
@@ -897,6 +1227,9 @@ async function fetchCopartMatches(page: Page, target: VinTarget, nowIso: string)
   const seenLots = new Set<string>();
   const entryLimit = 8;
   for (let pageIndex = 0; pageIndex < 8; pageIndex += 1) {
+    if (pageIndex > 0) {
+      await delayWithJitter(COPART_API_PAGE_DELAY_MS, COPART_DELAY_JITTER_MS);
+    }
     const response = await fetchCopartApiPage(page, target.vinPrefix, pageIndex, 100);
     const content = response?.data?.results?.content || [];
     if (!content.length) {
@@ -1159,7 +1492,11 @@ function extractImageCandidatesFromHtml(html: string, baseUrl: string): string[]
   ];
   for (const pattern of patterns) {
     for (const match of html.matchAll(pattern)) {
-      const candidate = absolutizeUrl(match[1] || match[0], baseUrl);
+      const rawCandidate = match[1] || match[0];
+      if (!isLikelyImageCandidate(rawCandidate, "html.image")) {
+        continue;
+      }
+      const candidate = absolutizeUrl(rawCandidate, baseUrl);
       if (candidate) {
         results.add(candidate);
       }
@@ -1190,6 +1527,9 @@ function stripResizeSearchParams(rawUrl: string): string | null {
 }
 
 function buildImageCandidateVariants(rawUrl: string, baseUrl: string): string[] {
+  if (!isLikelyImageCandidate(rawUrl, "variant.seed")) {
+    return [];
+  }
   const absolute = absolutizeUrl(rawUrl, baseUrl);
   if (!absolute) {
     return [];
@@ -1281,6 +1621,44 @@ function canonicalizeImageCandidate(imageUrl: string): string {
   return stripResizeSearchParams(withoutCloudflareResize) || withoutCloudflareResize;
 }
 
+function isLikelyImageCandidate(rawValue: string, keyHint = ""): boolean {
+  const trimmed = String(rawValue || "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  const normalized = trimmed.toLowerCase();
+  const normalizedKeyHint = keyHint.toLowerCase();
+  if (
+    normalized.startsWith("data:") ||
+    /^(width|height|initial-scale|max(?:imum)?-scale|user-scalable|telephone=no|light dark|noindex|nofollow|ie=edge)/i.test(trimmed) ||
+    /^[a-z-]+=[^/]+$/i.test(trimmed)
+  ) {
+    return false;
+  }
+  if (/\s/.test(trimmed) && !/%20/i.test(trimmed)) {
+    return false;
+  }
+  const urlLike =
+    /^https?:\/\//i.test(trimmed) ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("./") ||
+    trimmed.startsWith("../");
+  const imagePathLike =
+    /\.(?:jpe?g|png|webp|avif|gif)(?:[?#].*)?$/i.test(trimmed) ||
+    /\/(image|images|img|photo|photos|media|thumbnail|thumb|resizer|hero|gallery)(?:[/?._-]|$)/i.test(trimmed) ||
+    /cdn-cgi\/image/i.test(trimmed) ||
+    /vis\.iaai\.com\/resizer/i.test(trimmed) ||
+    /cs\.copart\.com\//i.test(trimmed);
+  if (imagePathLike) {
+    return true;
+  }
+  if (!urlLike) {
+    return false;
+  }
+  return /(image|img|thumb|photo|hero|gallery|iconurl|full|preview)/i.test(normalizedKeyHint);
+}
+
 function prioritizeImageCandidates(imageCandidates: Iterable<string>, baseUrl: string): string[] {
   const ranked = new Map<string, { url: string; score: number; order: number }>();
   let order = 0;
@@ -1305,6 +1683,30 @@ function prioritizeImageCandidates(imageCandidates: Iterable<string>, baseUrl: s
 
 async function collectPageImageCandidates(page: Page): Promise<string[]> {
   return await page.evaluate(() => {
+    const isLikelyImageCandidate = (rawValue: string) => {
+      const trimmed = String(rawValue || "").trim();
+      if (!trimmed) {
+        return false;
+      }
+      const normalized = trimmed.toLowerCase();
+      if (
+        normalized.startsWith("data:") ||
+        /^(width|height|initial-scale|max(?:imum)?-scale|user-scalable|telephone=no|light dark|noindex|nofollow|ie=edge)/i.test(trimmed) ||
+        /^[a-z-]+=[^/]+$/i.test(trimmed)
+      ) {
+        return false;
+      }
+      if (/\s/.test(trimmed) && !/%20/i.test(trimmed)) {
+        return false;
+      }
+      return (
+        /\.(?:jpe?g|png|webp|avif|gif)(?:[?#].*)?$/i.test(trimmed) ||
+        /\/(image|images|img|photo|photos|media|thumbnail|thumb|resizer|hero|gallery)(?:[/?._-]|$)/i.test(trimmed) ||
+        /cdn-cgi\/image/i.test(trimmed) ||
+        /vis\.iaai\.com\/resizer/i.test(trimmed) ||
+        /cs\.copart\.com\//i.test(trimmed)
+      );
+    };
     const attrs = ["src", "srcset", "data-src", "data-lazy", "data-zoom-image", "data-fullimage", "data-original"];
     const urls = new Set<string>();
     for (const element of Array.from(document.querySelectorAll("img, source, a, meta"))) {
@@ -1313,13 +1715,13 @@ async function collectPageImageCandidates(page: Page): Promise<string[]> {
         if (value) {
           for (const candidate of value.split(",")) {
             const normalized = candidate.trim().split(/\s+/)[0];
-            if (normalized) {
+            if (normalized && isLikelyImageCandidate(normalized)) {
               urls.add(normalized);
             }
           }
         }
       }
-      if (element instanceof HTMLMetaElement && element.content) {
+      if (element instanceof HTMLMetaElement && element.content && isLikelyImageCandidate(element.content)) {
         urls.add(element.content);
       }
       if (element instanceof HTMLAnchorElement && element.href && /\.(?:jpe?g|png|webp|avif|gif)(?:[?#].*)?$/i.test(element.href)) {
@@ -1432,75 +1834,98 @@ function selectBestImagePayload(
   ))[0] || null;
 }
 
-async function uploadImages(baseUrl: string, token: string, runId: string, page: Page, items: ScrapedRecordWithImages[]): Promise<void> {
-  for (const item of items) {
-    const enriched = await enrichRecordImages(page, item);
-    if (enriched.imageCandidates.length === 0) {
-      console.warn(`No image candidates for ${item.record.sourceKey} lot ${item.record.lotNumber} ${item.record.url}`);
+async function uploadImageForItem(baseUrl: string, token: string, runId: string, page: Page, item: ScrapedRecordWithImages): Promise<void> {
+  const enriched = await enrichRecordImages(page, item);
+  if (enriched.imageCandidates.length === 0) {
+    console.warn(`No image candidates for ${item.record.sourceKey} lot ${item.record.lotNumber} ${item.record.url}`);
+    return;
+  }
+
+  const currentImage = await fetchLotImageSyncState(baseUrl, token, item.record.sourceKey, item.record.lotNumber);
+  const topCandidate = enriched.imageCandidates[0];
+  if (currentImage && currentImage.sourceUrl === topCandidate && isHdImage(currentImage.width, currentImage.height)) {
+    return;
+  }
+
+  const fetchedPayloads: Array<{
+    sourceUrl: string;
+    mimeType: string;
+    sha256: string;
+    width: number | null;
+    height: number | null;
+    byteSize: number;
+    dataBase64: string;
+  }> = [];
+
+  for (const imageUrl of enriched.imageCandidates.slice(0, MAX_IMAGE_FETCH_ATTEMPTS)) {
+    const payload = await fetchImagePayload(page, imageUrl);
+    if (!payload) {
+      console.warn(`Image fetch failed for lot ${item.record.lotNumber}: ${imageUrl}`);
       continue;
     }
+    fetchedPayloads.push(payload);
+  }
 
-    const currentImage = await fetchLotImageSyncState(baseUrl, token, item.record.sourceKey, item.record.lotNumber);
-    const topCandidate = enriched.imageCandidates[0];
-    if (currentImage && currentImage.sourceUrl === topCandidate && isHdImage(currentImage.width, currentImage.height)) {
-      continue;
+  const selectedPayload = selectBestImagePayload(fetchedPayloads);
+  if (!selectedPayload) {
+    const bestMeasured = [...fetchedPayloads]
+      .sort((left, right) => scoreFetchedImage(right) - scoreFetchedImage(left) || right.byteSize - left.byteSize)[0];
+    if (bestMeasured && hasKnownImageDimensions(bestMeasured.width, bestMeasured.height)) {
+      console.warn(
+        `Skipping non-HD image for lot ${item.record.lotNumber}: ${bestMeasured.width}x${bestMeasured.height} ${bestMeasured.sourceUrl}`,
+      );
+    } else {
+      console.warn(`No acceptable image payloads for lot ${item.record.lotNumber}`);
     }
+    return;
+  }
 
-    const fetchedPayloads: Array<{
-      sourceUrl: string;
-      mimeType: string;
-      sha256: string;
-      width: number | null;
-      height: number | null;
-      byteSize: number;
-      dataBase64: string;
-    }> = [];
+  if (currentImage && currentImage.sha256 === selectedPayload.sha256) {
+    return;
+  }
 
-    for (const imageUrl of enriched.imageCandidates.slice(0, MAX_IMAGE_FETCH_ATTEMPTS)) {
-      const payload = await fetchImagePayload(page, imageUrl);
-      if (!payload) {
-        console.warn(`Image fetch failed for lot ${item.record.lotNumber}: ${imageUrl}`);
-        continue;
-      }
-      fetchedPayloads.push(payload);
-    }
+  await fetch(`${baseUrl}/api/ingest/image`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      runId,
+      sourceKey: item.record.sourceKey,
+      lotNumber: item.record.lotNumber,
+      sourceUrl: selectedPayload.sourceUrl,
+      mimeType: selectedPayload.mimeType,
+      width: selectedPayload.width,
+      height: selectedPayload.height,
+      sortOrder: 0,
+      dataBase64: selectedPayload.dataBase64,
+    }),
+  }).catch(() => {});
+}
 
-    const selectedPayload = selectBestImagePayload(fetchedPayloads);
-    if (!selectedPayload) {
-      const bestMeasured = [...fetchedPayloads]
-        .sort((left, right) => scoreFetchedImage(right) - scoreFetchedImage(left) || right.byteSize - left.byteSize)[0];
-      if (bestMeasured && hasKnownImageDimensions(bestMeasured.width, bestMeasured.height)) {
-        console.warn(
-          `Skipping non-HD image for lot ${item.record.lotNumber}: ${bestMeasured.width}x${bestMeasured.height} ${bestMeasured.sourceUrl}`,
-        );
-      } else {
-        console.warn(`No acceptable image payloads for lot ${item.record.lotNumber}`);
-      }
-      continue;
-    }
-
-    if (currentImage && currentImage.sha256 === selectedPayload.sha256) {
-      continue;
-    }
-
-    await fetch(`${baseUrl}/api/ingest/image`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          runId,
-          sourceKey: item.record.sourceKey,
-          lotNumber: item.record.lotNumber,
-          sourceUrl: selectedPayload.sourceUrl,
-          mimeType: selectedPayload.mimeType,
-          width: selectedPayload.width,
-          height: selectedPayload.height,
-          sortOrder: 0,
-          dataBase64: selectedPayload.dataBase64,
-        }),
-      }).catch(() => {});
+async function uploadImages(baseUrl: string, token: string, runId: string, context: BrowserContext, items: ScrapedRecordWithImages[]): Promise<void> {
+  if (items.length === 0) {
+    return;
+  }
+  const workerCount = Math.min(IMAGE_UPLOAD_CONCURRENCY, items.length);
+  const pages = await Promise.all(Array.from({ length: workerCount }, async () => await context.newPage()));
+  let nextIndex = 0;
+  try {
+    await Promise.all(
+      pages.map(async (page) => {
+        while (nextIndex < items.length) {
+          const item = items[nextIndex];
+          nextIndex += 1;
+          if (!item) {
+            break;
+          }
+          await uploadImageForItem(baseUrl, token, runId, page, item);
+        }
+      }),
+    );
+  } finally {
+    await Promise.all(pages.map(async (page) => await page.close().catch(() => {})));
   }
 }
 
@@ -1515,9 +1940,13 @@ async function verifyRunnerFreshness(baseUrl: string): Promise<void> {
 
 async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: string, scopes: CoveredScope[]): Promise<ScrapedRecordWithImages[]> {
   const records: ScrapedRecordWithImages[] = [];
-  for (const target of targets.filter((item) => item.enabledCopart && item.active)) {
+  const copartTargets = targets.filter((item) => item.enabledCopart && item.active);
+  for (const [index, target] of copartTargets.entries()) {
     const scope: CoveredScope = { sourceKey: "copart", targetKey: target.key, status: "failed" };
     scopes.push(scope);
+    if (index > 0) {
+      await delayWithJitter(COPART_TARGET_DELAY_MS, COPART_DELAY_JITTER_MS);
+    }
     const searchUrl = `https://www.copart.com/vehicle-search-year/tesla/${target.copartSlug}/${target.yearFrom}`;
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
     const state = await waitForReadyOrCaptcha(page, "copart");
@@ -1532,6 +1961,7 @@ async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: str
       scope.notes = `unexpected state ${state.status}`;
       continue;
     }
+    await delayWithJitter(COPART_READY_SETTLE_MS, COPART_DELAY_JITTER_MS);
     const targetRecords = await fetchCopartMatches(page, target, nowIso);
     records.push(...targetRecords);
     scope.status = "complete";
@@ -1540,13 +1970,13 @@ async function scrapeCopartTargets(page: Page, targets: VinTarget[], nowIso: str
   return records;
 }
 
-async function scrapeIaaiTargets(targets: VinTarget[], nowIso: string, scopes: CoveredScope[]): Promise<ScrapedRecordWithImages[]> {
+async function scrapeIaaiTargets(page: Page, targets: VinTarget[], nowIso: string, scopes: CoveredScope[]): Promise<ScrapedRecordWithImages[]> {
   const records: ScrapedRecordWithImages[] = [];
   for (const target of targets.filter((item) => item.enabledIaai && item.active)) {
     const scope: CoveredScope = { sourceKey: "iaai", targetKey: target.key, status: "failed" };
     scopes.push(scope);
     try {
-      const result = await fetchIaaiDirectMatches(target, nowIso);
+      const result = await fetchIaaiDirectMatches(page, target, nowIso);
       records.push(...result.records);
       scope.status = "complete";
       scope.notes = `${result.records.length} records across ${result.pagesFetched} pages`;
@@ -1607,15 +2037,23 @@ async function main(): Promise<void> {
     if (args.siteKeys.includes("copart") || args.siteKeys.includes("iaai")) {
       context = await launchAuctionContext(args.headless);
     }
+    const listPhaseTasks: Array<Promise<ScrapedRecordWithImages[]>> = [];
     if (args.siteKeys.includes("copart")) {
       const page = context?.pages()[0] || await context!.newPage();
-      const copartRecords = await scrapeCopartTargets(page, activeTargets, nowIso, scopes);
-      allRecords.push(...copartRecords);
+      listPhaseTasks.push(scrapeCopartTargets(page, activeTargets, nowIso, scopes));
     }
     if (args.siteKeys.includes("iaai")) {
-      const iaaiRecords = await scrapeIaaiTargets(activeTargets, nowIso, scopes);
-      allRecords.push(...iaaiRecords);
+      const iaaiPage = context?.pages()[1] || await context!.newPage();
+      const iaaiDelayMs = args.siteKeys.includes("copart") ? LIST_PHASE_STAGGER_MS : 0;
+      listPhaseTasks.push((async () => {
+        if (iaaiDelayMs > 0) {
+          await delay(iaaiDelayMs);
+        }
+        return await scrapeIaaiTargets(iaaiPage, activeTargets, nowIso, scopes);
+      })());
     }
+    const listPhaseRecords = await Promise.all(listPhaseTasks);
+    allRecords.push(...listPhaseRecords.flat());
     const dedupedRecords = Array.from(
       new Map(allRecords.map((item) => [`${item.record.sourceKey}|${item.record.lotNumber}`, item])).values(),
     );
@@ -1624,8 +2062,7 @@ async function main(): Promise<void> {
     console.log(`Ingested ${dedupedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);
 
     if (context) {
-      const page = context.pages()[0] || await context.newPage();
-      await uploadImages(args.baseUrl, ingestToken, ingestResult.runId, page, dedupedRecords);
+      await uploadImages(args.baseUrl, ingestToken, ingestResult.runId, context, dedupedRecords);
     }
   } finally {
     if (context) {
