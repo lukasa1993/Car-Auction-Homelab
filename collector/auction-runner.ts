@@ -1505,6 +1505,31 @@ function extractImageCandidatesFromHtml(html: string, baseUrl: string): string[]
   return [...results];
 }
 
+function buildCopartImageVariants(rawUrl: string): string[] {
+  const variants = new Set<string>();
+  try {
+    const parsed = new URL(rawUrl);
+    if (!/copart\.com$/i.test(parsed.hostname) && !/cs\.copart\.com$/i.test(parsed.hostname)) {
+      return [];
+    }
+    const match = parsed.pathname.match(/(\/v1\/AUTH_[^/]+\/)(ids-c-prod-)?lpp(\/.+)_(thb|ful|hrs)(\.(?:jpe?g|png|webp))$/i);
+    if (!match) {
+      return [];
+    }
+    const [, prefix, , middlePath, , extension] = match;
+    for (const nextSize of ["hrs", "ful", "thb"]) {
+      for (const nextPrefix of ["ids-c-prod-", ""]) {
+        const next = new URL(parsed.toString());
+        next.pathname = `${prefix}${nextPrefix}lpp${middlePath}_${nextSize}${extension}`;
+        variants.add(next.toString());
+      }
+    }
+  } catch {
+    return [];
+  }
+  return [...variants];
+}
+
 function stripCloudflareImageResize(url: string): string | null {
   const match = url.match(/\/cdn-cgi\/image\/[^/]+\/(https?:\/\/.+)$/i);
   return match ? match[1] : null;
@@ -1552,6 +1577,12 @@ function buildImageCandidateVariants(rawUrl: string, baseUrl: string): string[] 
     if (queryCleaned && !variants.has(queryCleaned)) {
       queue.push(queryCleaned);
     }
+
+    for (const copartVariant of buildCopartImageVariants(current)) {
+      if (!variants.has(copartVariant)) {
+        queue.push(copartVariant);
+      }
+    }
   }
   return [...variants];
 }
@@ -1574,6 +1605,9 @@ function scoreImageCandidate(imageUrl: string): number {
 
   if (/(^|[/?._-])(full|zoom|large|orig|original|hero|max|hires|hd)([/?._-]|$)/i.test(normalized)) {
     score += 10;
+  }
+  if (/(^|[/?._-])(hrs|ful)([/?._-]|$)/i.test(normalized)) {
+    score += 12;
   }
   if (/(^|[/?._-])(thumb|thumbnail|small|preview|icon|sprite)([/?._-]|$)/i.test(normalized)) {
     score -= 10;
@@ -1630,6 +1664,7 @@ function isLikelyImageCandidate(rawValue: string, keyHint = ""): boolean {
   const normalizedKeyHint = keyHint.toLowerCase();
   if (
     normalized.startsWith("data:") ||
+    normalized.endsWith(".xml") ||
     /^(width|height|initial-scale|max(?:imum)?-scale|user-scalable|telephone=no|light dark|noindex|nofollow|ie=edge)/i.test(trimmed) ||
     /^[a-z-]+=[^/]+$/i.test(trimmed)
   ) {
