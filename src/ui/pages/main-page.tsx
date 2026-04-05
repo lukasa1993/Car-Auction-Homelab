@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Check, Copy, ExternalLink, X } from "lucide-react";
 
 import type { LotListItem } from "../../lib/types";
 import { Button } from "../components/button";
@@ -154,22 +153,21 @@ function RejectListingButton({
   return (
     <form
       action={`/lots/${lot.id}/reject`}
-      className="contents"
+      className="flex-1 sm:contents"
       method="post"
       onSubmit={handleSubmit}
     >
       <input name="redirect" type="hidden" value={redirectTo} />
       <Button
         aria-label={isPending ? "Rejecting" : "Reject listing"}
-        className="h-10 w-10 shrink-0 rounded-2xl p-0 text-muted-foreground hover:text-destructive sm:h-8 sm:w-auto sm:rounded-4xl sm:px-3"
+        className="h-10 w-full min-w-0 rounded-2xl px-3 text-muted-foreground hover:text-destructive sm:h-8 sm:w-auto sm:rounded-4xl sm:px-3"
         disabled={isPending}
         size="sm"
         title={error ?? "Reject"}
         type="submit"
         variant="outline"
       >
-        <X className="h-4 w-4 sm:hidden" />
-        <span className="hidden sm:inline">{isPending ? "Rejecting..." : "Reject"}</span>
+        {isPending ? "Rejecting..." : "Reject"}
       </Button>
     </form>
   );
@@ -215,19 +213,14 @@ function CopyLotButton({ lot }: { lot: LotListItem }) {
   return (
     <Button
       aria-label={copied ? "Copied lot number" : "Copy lot number"}
-      className="h-10 w-10 shrink-0 rounded-2xl p-0 sm:h-8 sm:w-auto sm:rounded-4xl sm:px-3"
+      className="h-10 w-full min-w-0 flex-1 rounded-2xl px-3 sm:h-8 sm:w-auto sm:flex-none sm:rounded-4xl sm:px-3"
       onClick={handleCopy}
       size="sm"
       title={`Copy ${lot.lotNumber}`}
       type="button"
       variant="outline"
     >
-      {copied ? (
-        <Check className="h-4 w-4 sm:hidden" />
-      ) : (
-        <Copy className="h-4 w-4 sm:hidden" />
-      )}
-      <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
+      {copied ? "Copied" : "Copy"}
     </Button>
   );
 }
@@ -242,7 +235,7 @@ function LotRowActions({
   redirectTo: string;
 }) {
   return (
-    <div className="flex items-center justify-end gap-2">
+    <div className="flex w-full items-center justify-end gap-2">
       <a
         className="flex-1 sm:flex-initial"
         href={lot.url}
@@ -250,13 +243,11 @@ function LotRowActions({
         target="_blank"
       >
         <Button
-          className="h-10 w-full gap-1.5 rounded-2xl bg-foreground text-background shadow-sm hover:bg-foreground/90 sm:h-8 sm:w-auto sm:rounded-4xl sm:border sm:border-border sm:bg-background sm:text-foreground sm:shadow-none sm:hover:bg-accent sm:hover:text-accent-foreground"
+          className="h-10 w-full min-w-0 rounded-2xl bg-foreground px-3 text-background shadow-sm hover:bg-foreground/90 sm:h-8 sm:w-auto sm:rounded-4xl sm:border sm:border-border sm:bg-background sm:text-foreground sm:shadow-none sm:hover:bg-accent sm:hover:text-accent-foreground"
           size="sm"
           variant="default"
         >
-          <span className="sm:hidden">Open auction</span>
-          <span className="hidden sm:inline">Open</span>
-          <ExternalLink className="h-3.5 w-3.5 sm:hidden" />
+          Open
         </Button>
       </a>
       <CopyLotButton lot={lot} />
