@@ -119,9 +119,12 @@ export async function handleApiRoutes(
   }
 
   if (pathname === "/api/lots" && request.method === "GET") {
-    return Response.json(
-      services.store.getLotList(authState.admin && parseBoolean(url.searchParams.get("removed"), false)),
-    );
+    if (authState.admin) {
+      return Response.json(
+        services.store.getLotList(parseBoolean(url.searchParams.get("removed"), false)),
+      );
+    }
+    return Response.json(services.store.getPublicLotList());
   }
 
   return null;

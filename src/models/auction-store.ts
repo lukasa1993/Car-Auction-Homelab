@@ -636,6 +636,22 @@ export class AuctionStore {
       });
   }
 
+  getPublicLotList(): LotListItem[] {
+    const activeTargets = this.getVinTargets(true);
+    const activeTargetKeys = new Set(activeTargets.map((target) => target.key));
+    const activeCarTypes = new Set(activeTargets.map((target) => target.carType));
+
+    return this.getLotList(false).filter((lot) => {
+      if (lot.workflowState === "removed") {
+        return false;
+      }
+      if (lot.targetKey && activeTargetKeys.has(lot.targetKey)) {
+        return true;
+      }
+      return activeCarTypes.has(lot.carType);
+    });
+  }
+
   getLotDetail(sourceKey: SourceKey, lotNumber: string): LotDetail | null {
     const lotRow = this.db
       .query("SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1")

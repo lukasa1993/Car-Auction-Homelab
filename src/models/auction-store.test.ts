@@ -84,6 +84,51 @@ describe("AuctionStore ingest safeguards", () => {
     expect(store.getVinTargets().some((target) => target.id === targetId)).toBe(false);
   });
 
+  test("hides lots tied to inactive targets from public listings", () => {
+    const store = createStore();
+    for (const target of store.getVinTargets().filter((item) => item.carType === "Tesla Model Y")) {
+      store.upsertVinTarget({
+        id: target.id,
+        key: target.key,
+        vinPattern: target.vinPattern,
+        enabledCopart: false,
+        enabledIaai: false,
+        active: false,
+      });
+    }
+
+    store.ingest(createPayload([
+      createRecord({
+        targetKey: "model-y-gdee-tf",
+        lotNumber: "11111111",
+        carType: "Tesla Model Y",
+        marker: "Model Y · 7SAYGDEE-TF family",
+        vinPattern: "7SAYGDEE*TF",
+        modelYear: 2026,
+        vin: "7SAYGDEE0TF000001",
+        sourceDetailId: "detail-y",
+        vehicleTitle: "2026 Tesla Model Y",
+        url: "https://www.copart.com/lot/11111111/example",
+      }),
+      createRecord({
+        targetKey: "model-3-ec",
+        lotNumber: "22222222",
+        carType: "Tesla Model 3",
+        marker: "Model 3 · 5YJ3E1EC",
+        vinPattern: "5YJ3E1EC",
+        modelYear: 2023,
+        vin: "5YJ3E1EC0PF000001",
+        sourceDetailId: "detail-3",
+        vehicleTitle: "2023 Tesla Model 3",
+        url: "https://www.copart.com/lot/22222222/example",
+      }),
+    ]));
+
+    const publicLots = store.getPublicLotList();
+    expect(publicLots.some((lot) => lot.targetKey === "model-y-gdee-tf")).toBe(false);
+    expect(publicLots.some((lot) => lot.targetKey === "model-3-ec")).toBe(true);
+  });
+
   test("preserves known lot fields when a later record is sparse", () => {
     const store = createStore();
     store.upsertVinTarget({

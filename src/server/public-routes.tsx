@@ -49,7 +49,7 @@ export function handlePublicPages(
   const activeTab = resolveTab(url.searchParams.get("tab"), modelTabs);
   const activeModelTab = activeTab === "all" ? null : modelTabs.find((tab) => tab.key === activeTab) || null;
 
-  const allLots = services.store.getLotList(false).filter((lot) => lot.workflowState !== "removed");
+  const allLots = services.store.getPublicLotList();
   const filteredLots = activeModelTab
     ? allLots.filter(
         (lot) =>
