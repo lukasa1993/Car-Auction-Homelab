@@ -67,6 +67,23 @@ function createPayload(records: ScrapedLotRecord[], overrides: Partial<IngestPay
 }
 
 describe("AuctionStore ingest safeguards", () => {
+  test("removes a VIN target by id", () => {
+    const store = createStore();
+    const targetId = store.upsertVinTarget({
+      key: "test-target",
+      vinPattern: "5YJ3E1EA*",
+      label: "Model 3 test",
+      carType: "Tesla Model 3",
+      marker: "VIN · 5YJ3E1EA*",
+      yearFrom: 2021,
+      yearTo: 2021,
+    });
+
+    store.removeVinTarget(targetId);
+
+    expect(store.getVinTargets().some((target) => target.id === targetId)).toBe(false);
+  });
+
   test("preserves known lot fields when a later record is sparse", () => {
     const store = createStore();
     store.upsertVinTarget({

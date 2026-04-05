@@ -591,6 +591,13 @@ export class AuctionStore {
     return next.id;
   }
 
+  removeVinTarget(id: string): void {
+    const result = this.db.query("DELETE FROM vin_targets WHERE id = ?").run(id);
+    if (Number(result.changes ?? 0) === 0) {
+      throw new Error("Target not found.");
+    }
+  }
+
   getLotList(includeRemoved = false): LotListItem[] {
     const rows = this.db.query(`
       SELECT

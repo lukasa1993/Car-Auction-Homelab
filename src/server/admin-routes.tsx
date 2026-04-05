@@ -121,6 +121,20 @@ export async function handleAdminPages(
     return redirect("/admin", 303);
   }
 
+  const targetDeleteMatch = pathname.match(/^\/admin\/targets\/([^/]+)\/remove$/);
+  if (targetDeleteMatch && request.method === "POST") {
+    if (!authState.admin) {
+      return redirect("/admin/login?error=Admin%20access%20required", 303);
+    }
+    try {
+      services.store.removeVinTarget(decodeURIComponent(targetDeleteMatch[1]));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to remove target";
+      return redirect(`/admin?error=${encodeURIComponent(message)}`, 303);
+    }
+    return redirect("/admin", 303);
+  }
+
   const targetUpdateMatch = pathname.match(/^\/admin\/targets\/([^/]+)$/);
   if (targetUpdateMatch && request.method === "POST") {
     if (!authState.admin) {

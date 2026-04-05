@@ -56,7 +56,18 @@ function TargetCard({ target }: { target: VinTarget }) {
             <p className="text-sm text-muted-foreground">{subtitle}</p>
           </div>
         </div>
-        <Button size="sm" type="submit" variant="outline">Save</Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" type="submit" variant="outline">Save</Button>
+          <Button
+            formAction={`/admin/targets/${target.id}/remove`}
+            formNoValidate
+            size="sm"
+            type="submit"
+            variant="destructive"
+          >
+            Remove prefix
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
