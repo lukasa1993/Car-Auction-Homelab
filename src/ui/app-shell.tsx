@@ -1,5 +1,7 @@
 import * as React from "react";
 
+import { ThemeToggle } from "./components/theme-toggle";
+
 type LiveToast = {
   id: number;
   title: string;
@@ -108,6 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {children}
+      <ThemeToggle />
     </>
   );
 }

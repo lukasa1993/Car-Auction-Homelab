@@ -1,6 +1,13 @@
 import * as React from "react";
 
 import type { UserDateHints } from "../lib/date-render";
+import {
+  AUCTION_THEME_COOKIE_NAME,
+  AUCTION_THEME_STORAGE_KEY,
+  DEFAULT_THEME_PREFERENCE,
+  normalizeThemePreference,
+  type ThemePreference,
+} from "../lib/theme";
 import type { AppPage } from "./page-registry";
 
 function serializePage(page: AppPage): string {
@@ -15,6 +22,82 @@ function serializeInlineJson(value: unknown): string {
     .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
+}
+
+function buildThemeBootstrapScript(initialPreference: ThemePreference): string {
+  return `(() => {
+  const storageKey = ${serializeInlineJson(AUCTION_THEME_STORAGE_KEY)};
+  const cookieName = ${serializeInlineJson(AUCTION_THEME_COOKIE_NAME)};
+  const defaultPreference = ${serializeInlineJson(DEFAULT_THEME_PREFERENCE)};
+  const normalizePreference = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "light" || normalized === "dark" || normalized === "system"
+      ? normalized
+      : defaultPreference;
+  };
+  const root = document.documentElement;
+  const prefersDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const cookieSuffix = "; Path=/; Max-Age=31536000; SameSite=Lax" + (window.location.protocol === "https:" ? "; Secure" : "");
+  const readStoredPreference = () => {
+    try {
+      const storedValue = window.localStorage.getItem(storageKey);
+      return storedValue == null ? null : normalizePreference(storedValue);
+    } catch {
+      return null;
+    }
+  };
+  const writePreference = (preference) => {
+    try {
+      window.localStorage.setItem(storageKey, preference);
+    } catch {}
+    document.cookie = cookieName + "=" + encodeURIComponent(preference) + cookieSuffix;
+  };
+  const resolveTheme = (preference) => (
+    preference === "dark" || (preference === "system" && prefersDarkQuery.matches)
+      ? "dark"
+      : "light"
+  );
+  const emitTheme = (preference, resolvedTheme) => {
+    window.__AUCTION_THEME__ = { preference, resolvedTheme };
+    window.dispatchEvent(new CustomEvent("auction-theme-change", {
+      detail: { preference, resolvedTheme },
+    }));
+  };
+  const applyTheme = (preference, persist = false) => {
+    const normalizedPreference = normalizePreference(preference);
+    const resolvedTheme = resolveTheme(normalizedPreference);
+    root.classList.toggle("dark", resolvedTheme === "dark");
+    root.dataset.themePreference = normalizedPreference;
+    root.style.colorScheme = resolvedTheme;
+    if (persist) {
+      writePreference(normalizedPreference);
+    }
+    emitTheme(normalizedPreference, resolvedTheme);
+    return normalizedPreference;
+  };
+  let currentPreference = readStoredPreference() || normalizePreference(${serializeInlineJson(initialPreference)});
+  const shouldPersistInitialPreference = Boolean(readStoredPreference()) || currentPreference !== defaultPreference;
+  currentPreference = applyTheme(currentPreference, shouldPersistInitialPreference);
+  window.__setAuctionTheme = (preference) => {
+    currentPreference = applyTheme(preference, true);
+  };
+  const handleSystemThemeChange = () => {
+    if (currentPreference === "system") {
+      applyTheme(currentPreference, false);
+    }
+  };
+  if (typeof prefersDarkQuery.addEventListener === "function") {
+    prefersDarkQuery.addEventListener("change", handleSystemThemeChange);
+  } else if (typeof prefersDarkQuery.addListener === "function") {
+    prefersDarkQuery.addListener(handleSystemThemeChange);
+  }
+  window.addEventListener("storage", (event) => {
+    if (event.key !== storageKey) {
+      return;
+    }
+    currentPreference = applyTheme(event.newValue || defaultPreference, false);
+  });
+})();`;
 }
 
 function buildDateBootstrapScript(initialHints: UserDateHints): string {
@@ -102,18 +185,30 @@ function buildDateBootstrapScript(initialHints: UserDateHints): string {
 export function AppDocument({
   page,
   title,
+  initialThemePreference,
   children,
 }: {
   page: AppPage;
   title: string;
+  initialThemePreference: ThemePreference;
   children: React.ReactNode;
 }) {
+  const normalizedThemePreference = normalizeThemePreference(initialThemePreference);
+  const htmlClassName = ["h-full", normalizedThemePreference === "dark" ? "dark" : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className={htmlClassName} data-theme-preference={normalizedThemePreference}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: buildThemeBootstrapScript(normalizedThemePreference),
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -122,7 +217,7 @@ export function AppDocument({
         />
         <link rel="stylesheet" href="/app.css" />
       </head>
-      <body className="min-h-full bg-background text-foreground antialiased">
+      <body className="min-h-full bg-background text-foreground antialiased transition-colors duration-200">
         <div id="app-root">{children}</div>
         <script
           dangerouslySetInnerHTML={{

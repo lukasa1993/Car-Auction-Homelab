@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @source "../src";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
@@ -83,6 +84,10 @@
 
   html {
     color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {

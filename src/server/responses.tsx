@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 
 import { forwardSetCookieHeaders } from "../lib/auth";
 import { buildDateRenderConfig } from "./date-render";
+import { getThemePreferenceFromRequest } from "./theme";
 import { AppShell } from "../ui/app-shell";
 import { AppDocument } from "../ui/document";
 import { renderAppPage, type AppPage } from "../ui/page-registry";
@@ -33,9 +34,10 @@ export function renderPage(title: string, page: Omit<AppPage, "dateRender">, req
     ...page,
     dateRender: buildDateRenderConfig(request),
   } as AppPage;
+  const initialThemePreference = getThemePreferenceFromRequest(request);
 
   return new Response(`<!doctype html>${renderToString(
-    <AppDocument page={fullPage} title={title}>
+    <AppDocument page={fullPage} title={title} initialThemePreference={initialThemePreference}>
       <AppShell>{renderAppPage(fullPage)}</AppShell>
     </AppDocument>,
   )}`, {
