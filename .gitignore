@@ -7,6 +7,7 @@ public/app.css
 public/app.js
 .env
 runner-keys/
+.auction-headed-browser.env
 .playwright/
 __pycache__/
 *.pyc

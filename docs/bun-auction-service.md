@@ -131,8 +131,8 @@ export AUCTION_BASE_URL='https://auc.ldev.cloud'
 export AUCTION_COLLECTOR_UPDATE_BASE_URL='https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release'
 export AUCTION_INGEST_TOKEN='your-ingest-token'
 export AUCTION_COLLECTOR_PUBLIC_KEY_FILE='/path/to/collector-signing-key.pub.pem'
-cd collector
-bun run bootstrap --site copart,iaai --headless --unattended
+cd /path/to/Car-Auction-Homelab
+bash scripts/run-headed-collector.sh --site copart,iaai
 ```
 
 The bootstrap:
@@ -143,6 +143,13 @@ The bootstrap:
 - runs `bun install` in the cached collector directory
 - installs Playwright Chromium if needed
 - executes the current collector
+
+Collector runtime rules:
+
+- headed only on `DISPLAY=:99`
+- shared browser UI is the default manual intervention path
+- captcha or similar human gates pause the run until cleared or until `AUCTION_MANUAL_GATE_TIMEOUT_MS` expires
+- the wrapper script stays quiet on success so cron only alerts on actual failures
 
 The collector itself checks the configured collector update URL and exits if it is stale.
 

@@ -115,6 +115,12 @@ const COPART_API_PAGE_DELAY_MS = 1250;
 const COPART_DELAY_JITTER_MS = 750;
 const MIN_HD_LONG_EDGE = 1024;
 const MIN_HD_SHORT_EDGE = 720;
+const REQUIRED_DISPLAY = process.env.AUCTION_REQUIRED_DISPLAY || ":99";
+const DEFAULT_MANUAL_GATE_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_MANUAL_GATE_POLL_MS = 3000;
+const SHARED_HEADED_BROWSER_PRIMARY_URL = process.env.AUCTION_HEADED_BROWSER_URL || "";
+const SHARED_HEADED_BROWSER_FALLBACK_URL = process.env.AUCTION_HEADED_BROWSER_FALLBACK_URL || "";
+const SHARED_HEADED_BROWSER_PASSWORD = process.env.AUCTION_HEADED_BROWSER_PASSWORD || "";
 
 const HTML_ENTITY_MAP: Record<string, string> = {
   amp: "&",
@@ -222,6 +228,81 @@ function stripHtml(html: string): string {
 
 function pad2(value: number | string): string {
   return String(value).padStart(2, "0");
+}
+
+function getPositiveEnvNumber(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  if (seconds === 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function buildSharedHeadedBrowserHelp(currentUrl = ""): string {
+  const parts = [
+    SHARED_HEADED_BROWSER_PRIMARY_URL ? `Shared browser: ${SHARED_HEADED_BROWSER_PRIMARY_URL}` : "",
+    SHARED_HEADED_BROWSER_FALLBACK_URL ? `Fallback browser: ${SHARED_HEADED_BROWSER_FALLBACK_URL}` : "",
+    SHARED_HEADED_BROWSER_PASSWORD ? `password: ${SHARED_HEADED_BROWSER_PASSWORD}` : "",
+    currentUrl ? `current page: ${currentUrl}` : "",
+  ].filter(Boolean);
+
+  if (parts.length === 0) {
+    return "Shared browser details are not configured. Set AUCTION_HEADED_BROWSER_URL, AUCTION_HEADED_BROWSER_FALLBACK_URL, and AUCTION_HEADED_BROWSER_PASSWORD in the environment.";
+  }
+
+  return normalizeWhitespace(parts.join(" | "));
+}
+
+async function waitForManualGateClearance<T>({
+  label,
+  reason,
+  timeoutMs = getPositiveEnvNumber("AUCTION_MANUAL_GATE_TIMEOUT_MS", DEFAULT_MANUAL_GATE_TIMEOUT_MS),
+  pollMs = getPositiveEnvNumber("AUCTION_MANUAL_GATE_POLL_MS", DEFAULT_MANUAL_GATE_POLL_MS),
+  getCurrentUrl,
+  readState,
+  isResolved,
+  summarizeState,
+}: {
+  label: string;
+  reason: string;
+  timeoutMs?: number;
+  pollMs?: number;
+  getCurrentUrl?: () => string;
+  readState: () => Promise<T>;
+  isResolved: (state: T) => boolean;
+  summarizeState?: (state: T) => string;
+}): Promise<T> {
+  const startedAt = Date.now();
+  const initialUrl = getCurrentUrl?.() || "";
+  console.warn(
+    `Manual action required for ${label}: ${reason}. Waiting up to ${formatDuration(timeoutMs)}. ${buildSharedHeadedBrowserHelp(initialUrl)}`,
+  );
+  let lastState = await readState();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (isResolved(lastState)) {
+      console.log(`Manual gate cleared for ${label} after ${formatDuration(Date.now() - startedAt)}.`);
+      return lastState;
+    }
+    await delay(pollMs);
+    lastState = await readState();
+  }
+  const stateSummary = summarizeState ? summarizeState(lastState) : "";
+  const suffix = stateSummary ? ` Last state: ${stateSummary}.` : "";
+  throw new Error(
+    `Manual gate not cleared for ${label} within ${formatDuration(timeoutMs)}.${suffix} ${buildSharedHeadedBrowserHelp(
+      getCurrentUrl?.() || initialUrl,
+    )}`,
+  );
 }
 
 function parseArgs(argv: string[]): RunnerArgs {
@@ -1064,7 +1145,18 @@ async function fetchIaaiDirectMatches(
   const searchUrl = buildIaaiSearchUrl(target);
   const fallbackYear = target.yearFrom === target.yearTo ? target.yearFrom : null;
   await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-  const bootstrap = await waitForIaaiBootstrap(page);
+  let bootstrap = await waitForIaaiBootstrap(page);
+  if (bootstrap.failure) {
+    bootstrap = await waitForManualGateClearance({
+      label: `iaai ${target.key}`,
+      reason: `${bootstrap.failure} at ${searchUrl}`,
+      getCurrentUrl: () => page.url() || searchUrl,
+      readState: async () => await waitForIaaiBootstrap(page, 5000),
+      isResolved: (state) => !state.failure && (state.ready || state.noResults),
+      summarizeState: (state) =>
+        normalizeWhitespace([state.failure || "", state.ready ? "ready" : "", state.noResults ? "no-results" : "", state.title].join(" ")),
+    });
+  }
   if (bootstrap.failure === "access-denied") {
     throw new Error(`IAAI search access denied for ${target.key}`);
   }
@@ -1151,6 +1243,11 @@ async function fetchIaaiDirectMatches(
 }
 
 async function launchAuctionContext(headless: boolean, profileKey: SourceKey): Promise<BrowserContext> {
+  if (!headless && process.env.DISPLAY !== REQUIRED_DISPLAY) {
+    throw new Error(
+      `Collector must run headed on DISPLAY=${REQUIRED_DISPLAY}. Current DISPLAY=${process.env.DISPLAY || "<unset>"}. ${buildSharedHeadedBrowserHelp()}`,
+    );
+  }
   const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", `playwright-profile-${profileKey}`);
   await mkdir(profileDir, { recursive: true });
   return await chromium.launchPersistentContext(profileDir, {
@@ -2217,12 +2314,17 @@ async function scrapeCopartTargets(
     }
     const searchUrl = "https://www.copart.com/vehicleFinder";
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-    const state = await waitForReadyOrCaptcha(page, "copart");
+    let state = await waitForReadyOrCaptcha(page, "copart");
     if (state.status === "captcha") {
-      scope.status = "failed";
-      scope.notes = `captcha at ${searchUrl}`;
-      console.warn(`Copart captcha for ${target.key} at ${searchUrl}`);
-      continue;
+      state = await waitForManualGateClearance({
+        label: `copart ${target.key}`,
+        reason: `captcha at ${searchUrl}`,
+        getCurrentUrl: () => page.url() || searchUrl,
+        readState: async () => await detectPageState(page, "copart"),
+        isResolved: (nextState) => nextState.status === "ready",
+        summarizeState: (nextState) =>
+          normalizeWhitespace([nextState.status, nextState.title, nextState.bodyPreview].join(" ")).slice(0, 240),
+      });
     }
     await delayWithJitter(COPART_READY_SETTLE_MS, COPART_DELAY_JITTER_MS);
     try {
