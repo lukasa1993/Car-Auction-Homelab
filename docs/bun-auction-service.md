@@ -110,16 +110,14 @@ The Docker image is now:
 - compiled into a standalone Bun executable with `bun build --compile`
 - targeted to musl for Alpine
 - run from a minimal Alpine runtime image with no Bun toolchain installed
-- published automatically to GHCR by GitHub Actions from [publish-container.yml](/Users/l/_DEV/LNH/auction/.github/workflows/publish-container.yml)
+- built locally on the managed auction host, not published by GitHub Actions
 
 Default container port is `3005`.
 
-Image naming:
+Recommended local image tag:
 
 ```text
-ghcr.io/<owner>/<repo>:latest
-ghcr.io/<owner>/<repo>:sha-<commit>
-ghcr.io/<owner>/<repo>:<git-tag>
+car-auction-homelab:local
 ```
 
 ## Collector Bootstrap
@@ -153,19 +151,13 @@ Collector runtime rules:
 
 The collector itself checks the configured collector update URL and exits if it is stale.
 
-## GitHub Registry
+## GitHub Actions
 
-The workflow publishes on:
-
-- push to `main`
-- pushed tags like `v1.0.0`
-- manual `workflow_dispatch`
-
-It uses the built-in `GITHUB_TOKEN` with `packages: write`, so no extra registry secret is needed for publishing.
+GitHub Actions publishing is disabled for this repo. The app is built and deployed locally on the managed auction host instead of using GHCR.
 
 ## Auction Deployment
 
-The auction host should pull the published GHCR image. The repo checkout only provides the Compose file and deployment notes.
+The auction host should build and run a local image from the repo checkout.
 
 1. On your local machine, generate the runtime env and signing keys:
 
@@ -204,15 +196,15 @@ cp runner-keys/collector-signing-key.pem /Users/l/_APPS/auction/runner-keys/
 cp runner-keys/collector-signing-key.pub.pem /Users/l/_APPS/auction/runner-keys/
 ```
 
-6. Pull and run the published image from the repo checkout:
+6. Build and run the local image from the repo checkout:
 
 ```bash
 cd /Users/l/_APPS/auction/repo
-AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/auction/compose.yml pull
-AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction /usr/local/bin/docker compose -f deploy/auction/compose.yml up -d
+docker build -t car-auction-homelab:local .
+AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
+AUCTION_IMAGE=car-auction-homelab:local \
+/usr/local/bin/docker compose -f deploy/auction/compose.yml up -d
 ```
-
-The Compose service sets `container_name: auction` and opts into Watchtower with the label `com.centurylinklabs.watchtower.enable=true`. If the Mac mini runs Watchtower with label filtering enabled, this is the container name and label it should match.
 
 Quick verification on the auction host:
 
@@ -224,19 +216,15 @@ docker inspect auction --format '{{json .Config.Labels}}'
 By default the Compose file uses:
 
 ```text
-ghcr.io/lukasa1993/car-auction-homelab:latest
+car-auction-homelab:local
 ```
 
-To pin a different tag or digest temporarily:
+To use a different local image tag temporarily:
 
 ```bash
 cd /Users/l/_APPS/auction/repo
 AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
-AUCTION_IMAGE=ghcr.io/lukasa1993/car-auction-homelab:<tag-or-digest> \
-/usr/local/bin/docker compose -f deploy/auction/compose.yml pull
-
-AUCTION_RUNTIME_DIR=/Users/l/_APPS/auction \
-AUCTION_IMAGE=ghcr.io/lukasa1993/car-auction-homelab:<tag-or-digest> \
+AUCTION_IMAGE=car-auction-homelab:<tag> \
 /usr/local/bin/docker compose -f deploy/auction/compose.yml up -d
 ```
 
@@ -271,5 +259,4 @@ rm -rf /Users/l/_APPS/caddy/site/auc.ldev.cloud
 - There is no dedicated scheduler container yet; the expected production pattern is cron invoking the collector bootstrap on chosen machines.
 - If you need more than one admin later, extend `AUCTION_ADMIN_EMAILS` in `.env` as a comma-separated list.
 - `collector/release/*` must be regenerated and pushed whenever the collector runtime changes.
-- `latest` only reflects the default branch. If the auction host needs a pre-merge image, publish and pin a non-`latest` tag first.
 - The app can still serve `/collector/runtime/*` for local development or fallback updates.

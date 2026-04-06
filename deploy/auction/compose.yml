@@ -2,12 +2,9 @@ name: auction
 
 services:
   auction:
-    image: ${AUCTION_IMAGE:-ghcr.io/lukasa1993/car-auction-homelab:latest}
+    image: ${AUCTION_IMAGE:-car-auction-homelab:local}
     container_name: auction
-    pull_policy: always
     restart: unless-stopped
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
     ports:
       - "127.0.0.1:3005:3005"
     env_file:
