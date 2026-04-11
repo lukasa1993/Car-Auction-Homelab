@@ -95,6 +95,17 @@ function preferredNumber(next: number | null | undefined, fallback: number | nul
   return next == null ? fallback ?? null : Number(next);
 }
 
+function serializeJsonOrNull(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
 function shouldPreserveKnownLotStatus(nextStatus: LotRow["status"], currentStatus: LotRow["status"]): boolean {
   return nextStatus === "unknown" && (currentStatus === "upcoming" || currentStatus === "done");
 }
@@ -175,6 +186,8 @@ function mapLotRow(row: Record<string, unknown>): LotRow {
     location: row.location ? String(row.location) : null,
     url: String(row.url),
     evidence: row.evidence ? String(row.evidence) : null,
+    color: row.color ? String(row.color) : null,
+    sourceRawJson: row.source_raw_json ? String(row.source_raw_json) : null,
     firstSeenAt: String(row.first_seen_at),
     lastSeenAt: String(row.last_seen_at),
     lastIngestedAt: String(row.last_ingested_at),
@@ -316,6 +329,8 @@ export class AuctionStore {
         location TEXT,
         url TEXT NOT NULL,
         evidence TEXT,
+        color TEXT,
+        source_raw_json TEXT,
         first_seen_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL,
         last_ingested_at TEXT NOT NULL,
@@ -373,6 +388,16 @@ export class AuctionStore {
       CREATE INDEX IF NOT EXISTS idx_snapshots_lot_id ON lot_snapshots(lot_id);
       CREATE INDEX IF NOT EXISTS idx_actions_lot_id ON lot_actions(lot_id);
     `);
+
+    const lotColumns = new Set(
+      (this.db.query("PRAGMA table_info(lots)").all() as Array<Record<string, unknown>>).map((row) => String(row.name)),
+    );
+    if (!lotColumns.has("color")) {
+      this.db.exec("ALTER TABLE lots ADD COLUMN color TEXT");
+    }
+    if (!lotColumns.has("source_raw_json")) {
+      this.db.exec("ALTER TABLE lots ADD COLUMN source_raw_json TEXT");
+    }
   }
 
   private seedDefaultTargets(): void {
@@ -973,6 +998,8 @@ export class AuctionStore {
       const mergedLocation = preferredText(record.location, current.location);
       const mergedUrl = preferredText(record.url, current.url) || current.url;
       const mergedEvidence = preferredText(record.evidence, current.evidence);
+      const mergedColor = preferredText(record.color, current.color);
+      const mergedSourceRawJson = serializeJsonOrNull(record.sourceRaw) ?? current.sourceRawJson;
       this.db.query(`
         UPDATE lots
         SET
@@ -991,6 +1018,8 @@ export class AuctionStore {
           location = ?,
           url = ?,
           evidence = ?,
+          color = ?,
+          source_raw_json = ?,
           last_seen_at = ?,
           last_ingested_at = ?,
           last_sync_run_id = ?,
@@ -1015,6 +1044,8 @@ export class AuctionStore {
         mergedLocation,
         mergedUrl,
         mergedEvidence,
+        mergedColor,
+        mergedSourceRawJson,
         observedAt,
         observedAt,
         runId,
@@ -1035,9 +1066,9 @@ export class AuctionStore {
         id, source_key, source_label, target_key, lot_number, source_detail_id,
         car_type, marker, vin_pattern, vin, model_year, year_page, status,
         workflow_state, workflow_note, auction_date, auction_date_raw, location,
-        url, evidence, first_seen_at, last_seen_at, last_ingested_at, last_sync_run_id,
+        url, evidence, color, source_raw_json, first_seen_at, last_seen_at, last_ingested_at, last_sync_run_id,
         missing_since, missing_count, canceled_at, approved_at, removed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, NULL, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, NULL, ?)
     `).run(
       id,
       record.sourceKey,
@@ -1057,6 +1088,8 @@ export class AuctionStore {
       preferredText(record.location, null),
       preferredText(record.url, null) || "",
       preferredText(record.evidence, null),
+      preferredText(record.color, null),
+      serializeJsonOrNull(record.sourceRaw),
       observedAt,
       observedAt,
       observedAt,

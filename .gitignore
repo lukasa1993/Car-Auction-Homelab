@@ -1,4 +1,6 @@
 node_modules/
+**tmp**
+collector/.tmp*
 collector/node_modules/
 collector/dist/
 dist/

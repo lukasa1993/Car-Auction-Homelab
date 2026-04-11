@@ -7,6 +7,7 @@ import { Button } from "../components/button";
 import { CopyTextButton } from "../components/copy-text-button";
 import { LocalizedDateText, useDateNowMs } from "../date-render";
 import {
+  extractLotColor,
   formatAuctionCountdown,
   formatBytes,
   hasExactAuctionTime,
@@ -151,6 +152,7 @@ export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
   const lot = detail.lot;
   const title = stripTeslaPrefix(lot.carType);
   const heading = lot.modelYear ? `${lot.modelYear} ${title}` : title;
+  const color = lot.color || extractLotColor(lot.evidence);
   const redirectTo = `/lots/${lot.sourceKey}/${lot.lotNumber}`;
   const showCountdown = hasExactAuctionTime(lot.auctionDate);
 
@@ -267,6 +269,7 @@ export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
               {lot.modelYear ? (
                 <FactRow label="Model year">{lot.modelYear}</FactRow>
               ) : null}
+              {color ? <FactRow label="Color">{color}</FactRow> : null}
               {lot.location ? <FactRow label="Location">{lot.location}</FactRow> : null}
               {lot.auctionDateRaw ? (
                 <FactRow label="Auction">{lot.auctionDateRaw}</FactRow>

@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
 type AdminSection = "targets" | "history";
@@ -48,7 +49,10 @@ export function AdminHeader({ email, active, historyCount }: AdminHeaderProps) {
           })}
         </nav>
       </div>
-      <UserMenu email={email} />
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <UserMenu email={email} />
+      </div>
     </header>
   );
 }

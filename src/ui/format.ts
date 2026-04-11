@@ -50,12 +50,11 @@ export function formatLocalAuctionTime(
     return null;
   }
 
-  return `${new Intl.DateTimeFormat(hints.locale || undefined, {
+  return new Intl.DateTimeFormat(hints.locale || undefined, {
     hour: "numeric",
     minute: "2-digit",
     timeZone: hints.timeZone,
-    timeZoneName: "short",
-  }).format(target)} local`;
+  }).format(target);
 }
 
 export function formatAuctionDateDisplay(lot: {
@@ -132,4 +131,38 @@ export function formatBytes(n: number): string {
 
 export function stripTeslaPrefix(carType: string): string {
   return carType.replace(/^Tesla\s+/, "");
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function extractLotColor(evidence: string | null | undefined): string | null {
+  const text = String(evidence || "");
+  if (!text) {
+    return null;
+  }
+
+  const patterns = [
+    /\bExterior\s+Color:\s*([^:]+?)(?=\s+(?:Interior\s+Color:|Primary\s+Damage:|Secondary\s+Damage:|Odometer:|Airbags:|Key:|Engine:|Fuel\s+Type:|Transmission:|Driveline\s+Type:|VIN:|Lot\s+number:|Stock\s*#:|Branch:|Market:|Auction:|Current\s+bid:|$))/i,
+    /\bColor:\s*([^:]+?)(?=\s+(?:Exterior\s+Color:|Interior\s+Color:|Primary\s+Damage:|Secondary\s+Damage:|Odometer:|Airbags:|Key:|Engine:|Fuel\s+Type:|Transmission:|Driveline\s+Type:|VIN:|Lot\s+number:|Stock\s*#:|Branch:|Market:|Auction:|Current\s+bid:|$))/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const color = match[1].replace(/\s+/g, " ").trim().replace(/[.,;:\-–]+$/, "");
+    if (color) {
+      return toTitleCase(color);
+    }
+  }
+
+  return null;
 }

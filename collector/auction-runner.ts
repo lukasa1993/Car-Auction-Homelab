@@ -57,6 +57,8 @@ interface ScrapedLotRecord {
   location: string;
   url: string;
   evidence: string;
+  color?: string | null;
+  sourceRaw?: unknown;
 }
 
 interface VinTargetMetadataUpdate {
@@ -224,6 +226,48 @@ function stripHtml(html: string): string {
         .replace(/<[^>]+>/g, " "),
     ),
   );
+}
+
+function toTitleCase(value: string): string {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function extractColorValue(text: string | null | undefined): string | null {
+  const normalized = normalizeWhitespace(text);
+  if (!normalized) {
+    return null;
+  }
+
+  const patterns = [
+    /\b(?:Exterior\s+Color|Color)\s*:\s*([^:]+?)(?=\s+(?:Interior\s+Color|Transmission|Stock|Lot\s*#|Primary\s+Damage|Secondary\s+Damage|Odometer|Mileage|Current\s+Bid|Branch|Auction|VIN|$))/i,
+    /\bColor\s*[-–]\s*([^:]+?)(?=\s+(?:Transmission|Stock|Lot\s*#|Primary\s+Damage|Secondary\s+Damage|Odometer|Mileage|Current\s+Bid|Branch|Auction|VIN|$))/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const color = normalizeWhitespace(match[1]).replace(/[.,;:\-–]+$/, "");
+    if (color) {
+      return toTitleCase(color);
+    }
+  }
+
+  return null;
+}
+
+function normalizeColorValue(value: string | null | undefined): string | null {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return null;
+  }
+  return toTitleCase(normalized.replace(/[.,;:\-–]+$/, ""));
 }
 
 function pad2(value: number | string): string {
@@ -752,7 +796,13 @@ function applyTargetUpdates(targets: VinTarget[], updates: VinTargetMetadataUpda
   });
 }
 
-function buildRecord(sourceKey: SourceKey, yearPage: number | null, candidate: { text: string; url: string; title?: string | null }, nowIso: string, target: VinTarget): ScrapedLotRecord | null {
+function buildRecord(
+  sourceKey: SourceKey,
+  yearPage: number | null,
+  candidate: { text: string; url: string; title?: string | null; color?: string | null; sourceRaw?: unknown },
+  nowIso: string,
+  target: VinTarget,
+): ScrapedLotRecord | null {
   const text = normalizeWhitespace(candidate.text);
   if (!/\/lot\/\d+/i.test(candidate.url) && !/\/VehicleDetail\/\d+/i.test(candidate.url)) {
     return null;
@@ -792,6 +842,8 @@ function buildRecord(sourceKey: SourceKey, yearPage: number | null, candidate: {
     location: extractLocation(text),
     url: candidate.url,
     evidence: text,
+    color: candidate.color ?? extractColorValue(text),
+    sourceRaw: candidate.sourceRaw,
   };
   if (!record.lotNumber) {
     return null;
@@ -852,6 +904,7 @@ interface IaaiSearchCandidate {
   text: string;
   url: string;
   imageCandidates: string[];
+  raw: Record<string, unknown>;
 }
 
 interface IaaiSearchSnapshot {
@@ -1114,7 +1167,37 @@ async function readIaaiSearchSnapshotFromHtml(page: Page, html: string, fallback
       if (!text) {
         continue;
       }
-      candidates.push({ title: titleText, text, url, imageCandidates });
+      candidates.push({
+        title: titleText,
+        text,
+        url,
+        imageCandidates,
+        raw: {
+          source: "iaai-search-html",
+          title: titleText,
+          stockNumber,
+          saleDoc,
+          primaryDamage,
+          secondaryDamage,
+          lossType,
+          odometer,
+          startCode,
+          airbags,
+          keyState,
+          engine,
+          fuelType,
+          transmission,
+          driveline,
+          vin,
+          branch,
+          vehicleLocation,
+          market,
+          acv,
+          auctionDate,
+          actionTexts,
+          imageCandidates,
+        },
+      });
     }
 
     return {
@@ -1489,6 +1572,11 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
     location: item.yn || item.syn || "",
     url: `https://www.copart.com/lot/${item.lotNumberStr}/${item.ldu || ""}`.replace(/\/$/, ""),
     evidence: text,
+    color: normalizeColorValue(item.clr) || extractColorValue([item.lcd, item.ld, item.ess].filter(Boolean).join(" ")),
+    sourceRaw: {
+      source: "copart-search-api",
+      item,
+    },
   };
   if (!record.lotNumber || !isUpcomingStatus(record, nowIso) || !isWithinSaleWindow(record, nowIso)) {
     return null;
@@ -2091,25 +2179,70 @@ async function collectPageImageCandidates(page: Page): Promise<string[]> {
   });
 }
 
-async function enrichRecordImages(page: Page, item: ScrapedRecordWithImages): Promise<ScrapedRecordWithImages> {
-  const rankedSeedCandidates = prioritizeImageCandidates(item.imageCandidates, item.record.url);
-  if (rankedSeedCandidates.length > 0 && scoreImageCandidate(rankedSeedCandidates[0]) >= 6) {
+async function captureDetailPageSnapshot(page: Page): Promise<{
+  title: string;
+  metaDescription: string;
+  canonicalUrl: string;
+  visibleTextPreview: string;
+  imageCandidates: string[];
+}> {
+  const html = await page.content().catch(() => "");
+  const domUrls = await collectPageImageCandidates(page);
+  const detail = await page.evaluate(() => {
+    const normalize = (value: string | null | undefined) => String(value || "").replace(/\s+/g, " ").trim();
     return {
-      ...item,
-      imageCandidates: rankedSeedCandidates.slice(0, 8),
+      title: normalize(document.title),
+      metaDescription: normalize(document.querySelector<HTMLMetaElement>('meta[name="description"]')?.content),
+      canonicalUrl: normalize(document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href),
+      visibleTextPreview: normalize(document.body?.innerText || "").slice(0, 5000),
     };
-  }
+  });
+
+  return {
+    ...detail,
+    imageCandidates: prioritizeImageCandidates(
+      [...domUrls, ...extractImageCandidatesFromHtml(html, page.url() || detail.canonicalUrl || "")],
+      page.url() || detail.canonicalUrl || "",
+    ).slice(0, 8),
+  };
+}
+
+function mergeSourceRaw(existing: unknown, next: Record<string, unknown>): Record<string, unknown> {
+  const base = existing && typeof existing === "object" && !Array.isArray(existing)
+    ? existing as Record<string, unknown>
+    : {};
+  return {
+    ...base,
+    ...next,
+  };
+}
+
+async function enrichRecordDetails(page: Page, item: ScrapedRecordWithImages): Promise<ScrapedRecordWithImages> {
+  const rankedSeedCandidates = prioritizeImageCandidates(item.imageCandidates, item.record.url);
   await page.goto(item.record.url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   await dismissBanners(page);
   await page.waitForTimeout(1500);
-  const html = await page.content().catch(() => "");
-  const domUrls = await collectPageImageCandidates(page);
+
+  const snapshot = await captureDetailPageSnapshot(page);
   const prioritizedCandidates = prioritizeImageCandidates(
-    [...rankedSeedCandidates, ...domUrls, ...extractImageCandidatesFromHtml(html, item.record.url)],
+    [...rankedSeedCandidates, ...snapshot.imageCandidates],
     item.record.url,
   );
+  const detailColor = extractColorValue(`${snapshot.metaDescription} ${snapshot.visibleTextPreview}`);
+
   return {
-    ...item,
+    record: {
+      ...item.record,
+      color: detailColor ?? item.record.color ?? extractColorValue(item.record.evidence),
+      sourceRaw: mergeSourceRaw(item.record.sourceRaw, {
+        detailPage: {
+          title: snapshot.title,
+          metaDescription: snapshot.metaDescription,
+          canonicalUrl: snapshot.canonicalUrl,
+          visibleTextPreview: snapshot.visibleTextPreview,
+        },
+      }),
+    },
     imageCandidates: prioritizedCandidates.slice(0, 8),
   };
 }
@@ -2194,7 +2327,7 @@ function selectBestImagePayload(
 }
 
 async function uploadImageForItem(baseUrl: string, token: string, runId: string, page: Page, item: ScrapedRecordWithImages): Promise<void> {
-  const enriched = await enrichRecordImages(page, item);
+  const enriched = item.imageCandidates.length > 0 ? item : await enrichRecordDetails(page, item);
   if (enriched.imageCandidates.length === 0) {
     console.warn(`No image candidates for ${item.record.sourceKey} lot ${item.record.lotNumber} ${item.record.url}`);
     return;
@@ -2261,6 +2394,42 @@ async function uploadImageForItem(baseUrl: string, token: string, runId: string,
       dataBase64: selectedPayload.dataBase64,
     }),
   }).catch(() => {});
+}
+
+async function enrichRecordsWithDetails(context: BrowserContext, items: ScrapedRecordWithImages[]): Promise<ScrapedRecordWithImages[]> {
+  if (items.length === 0) {
+    return items;
+  }
+
+  const workerCount = Math.min(IMAGE_UPLOAD_CONCURRENCY, items.length);
+  const pages = await Promise.all(Array.from({ length: workerCount }, async () => await context.newPage()));
+  const enriched = [...items];
+  let nextIndex = 0;
+
+  try {
+    await Promise.all(
+      pages.map(async (page) => {
+        while (nextIndex < items.length) {
+          const index = nextIndex;
+          nextIndex += 1;
+          const item = items[index];
+          if (!item) {
+            continue;
+          }
+          try {
+            enriched[index] = await enrichRecordDetails(page, item);
+          } catch (error) {
+            console.warn(`Detail enrichment failed for lot ${item.record.lotNumber}: ${error instanceof Error ? error.message : String(error)}`);
+            enriched[index] = item;
+          }
+        }
+      }),
+    );
+  } finally {
+    await Promise.all(pages.map(async (page) => await page.close().catch(() => {})));
+  }
+
+  return enriched;
 }
 
 async function uploadImages(baseUrl: string, token: string, runId: string, context: BrowserContext, items: ScrapedRecordWithImages[]): Promise<void> {
@@ -2486,6 +2655,20 @@ async function main(): Promise<void> {
     const dedupedRecords = Array.from(
       new Map(allRecords.map((item) => [`${item.record.sourceKey}|${item.record.lotNumber}`, item])).values(),
     );
+    const enrichedRecords = [
+      ...(sourceContexts.copart
+        ? await enrichRecordsWithDetails(
+            sourceContexts.copart,
+            dedupedRecords.filter((item) => item.record.sourceKey === "copart"),
+          )
+        : []),
+      ...(sourceContexts.iaai
+        ? await enrichRecordsWithDetails(
+            sourceContexts.iaai,
+            dedupedRecords.filter((item) => item.record.sourceKey === "iaai"),
+          )
+        : []),
+    ];
     const targetUpdates = buildDiscoveredTargetUpdates(allObservations, activeTargets);
     const ingestTargetUpdates = fastTargetMetadataPosted ? buildDeferredTargetRangeUpdates(targetUpdates) : targetUpdates;
     const completedAt = new Date().toISOString();
@@ -2493,13 +2676,13 @@ async function main(): Promise<void> {
       args.baseUrl,
       ingestToken,
       scopes,
-      dedupedRecords,
+      enrichedRecords,
       ingestTargetUpdates,
       args,
       startedAt,
       completedAt,
     );
-    console.log(`Ingested ${dedupedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);
+    console.log(`Ingested ${enrichedRecords.length} records into ${args.baseUrl} run ${ingestResult.runId}.`);
 
     await Promise.all([
       sourceContexts.copart
@@ -2508,7 +2691,7 @@ async function main(): Promise<void> {
             ingestToken,
             ingestResult.runId,
             sourceContexts.copart,
-            dedupedRecords.filter((item) => item.record.sourceKey === "copart"),
+            enrichedRecords.filter((item) => item.record.sourceKey === "copart"),
           )
         : Promise.resolve(),
       sourceContexts.iaai
@@ -2517,7 +2700,7 @@ async function main(): Promise<void> {
             ingestToken,
             ingestResult.runId,
             sourceContexts.iaai,
-            dedupedRecords.filter((item) => item.record.sourceKey === "iaai"),
+            enrichedRecords.filter((item) => item.record.sourceKey === "iaai"),
           )
         : Promise.resolve(),
     ]);

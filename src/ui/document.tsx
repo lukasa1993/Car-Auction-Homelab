@@ -159,8 +159,7 @@ function buildDateBootstrapScript(initialHints: UserDateHints): string {
         hour: "numeric",
         minute: "2-digit",
         timeZone: hints.timeZone,
-        timeZoneName: "short",
-      }).format(new Date(parsed)) + " local";
+      }).format(new Date(parsed));
     } catch {
       return fallback;
     }

@@ -60,6 +60,8 @@ export interface ScrapedLotRecord {
   location: string;
   url: string;
   evidence: string;
+  color?: string | null;
+  sourceRaw?: unknown;
   images?: ScrapedImagePayload[];
 }
 
@@ -115,6 +117,8 @@ export interface LotRow {
   location: string | null;
   url: string;
   evidence: string | null;
+  color: string | null;
+  sourceRawJson: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
   lastIngestedAt: string;

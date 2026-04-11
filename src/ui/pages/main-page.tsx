@@ -5,8 +5,10 @@ import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
 import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
+import { ThemeToggle } from "../components/theme-toggle";
 import { LocalizedDateText, useDateNowMs } from "../date-render";
 import {
+  extractLotColor,
   formatAuctionCountdown,
   formatAuctionDateDisplay,
   formatRelativeTimestamp,
@@ -28,8 +30,8 @@ export interface MainPageProps {
   auth: { signedIn: boolean; admin: boolean; email: string | null };
 }
 
-function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
-  if (!lot.auctionDate || !hasExactAuctionTime(lot.auctionDate)) {
+function isPriorityAuction(lot: LotListItem, nowMs: number): boolean {
+  if (lot.status === "done" || !lot.auctionDate || !hasExactAuctionTime(lot.auctionDate)) {
     return false;
   }
   const target = Date.parse(lot.auctionDate);
@@ -37,7 +39,7 @@ function isStartingSoon(lot: LotListItem, nowMs: number): boolean {
     return false;
   }
   const diff = target - nowMs;
-  return diff > 0 && diff <= 12 * 60 * 60 * 1000;
+  return diff <= 12 * 60 * 60 * 1000 && diff >= -12 * 60 * 60 * 1000;
 }
 
 function countdownUrgency(
@@ -59,6 +61,22 @@ function countdownUrgency(
     return "imminent";
   }
   return null;
+}
+
+function LotTimingMeta({ lot, nowMs }: { lot: LotListItem; nowMs: number }) {
+  const urgency = countdownUrgency(lot.auctionDate, nowMs);
+  const startedLabel = urgency === "live" ? formatRelativeTimestamp(lot.auctionDate, nowMs, "") : null;
+
+  return (
+    <>
+      {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
+      {urgency === "live" ? (
+        <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">
+          · {startedLabel ? `Started ${startedLabel}` : "Started"}
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 function ImageCell({ lot }: { lot: LotListItem }) {
@@ -85,6 +103,13 @@ function LotSourceCell({ lot }: { lot: LotListItem }) {
       ) : null}
     </div>
   );
+}
+
+function LotModelCell({ lot }: { lot: LotListItem }) {
+  const color = lot.color || extractLotColor(lot.evidence);
+  const label = [stripTeslaPrefix(lot.carType), color].filter(Boolean).join(" ");
+
+  return <div className="text-[15px] font-semibold leading-snug sm:text-sm sm:font-normal">{label}</div>;
 }
 
 function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
@@ -273,8 +298,8 @@ export function MainPage({
     setVisibleLotsState((current) => current.filter((lot) => lot.id !== lotId));
   }, []);
 
-  const soonLots = allLotsState.filter((lot) => isStartingSoon(lot, nowMs));
-  const remainingLots = visibleLotsState.filter((lot) => !isStartingSoon(lot, nowMs));
+  const soonLots = allLotsState.filter((lot) => isPriorityAuction(lot, nowMs));
+  const remainingLots = visibleLotsState.filter((lot) => !isPriorityAuction(lot, nowMs));
   const redirectTo = buildTabHref(activeTab);
 
   return (
@@ -285,20 +310,23 @@ export function MainPage({
             <h1 className="text-base font-semibold">Auction Monitor</h1>
             <span className="text-[12px] text-muted-foreground">{formatRelativeTimestamp(lastCollectorIngestAt, nowMs)}</span>
           </div>
-          {auth.admin ? (
-            <a
-              className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-              href="/admin"
-            >
-              Admin →
-            </a>
-          ) : null}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            {auth.admin ? (
+              <a
+                className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                href="/admin"
+              >
+                Admin →
+              </a>
+            ) : null}
+          </div>
         </header>
 
         {soonLots.length > 0 ? (
           <Card className="bg-[color:var(--soon-bg)] ring-[color:var(--soon-border)]">
             <CardHeader className="pb-0">
-              <CardTitle className="text-sm">Upcoming &lt; 12h</CardTitle>
+              <CardTitle className="text-sm">Live now & upcoming &lt; 12h</CardTitle>
             </CardHeader>
             <CardContent className="pt-2">
               <Table className="block sm:table">
@@ -327,10 +355,10 @@ export function MainPage({
                         >
                           {formatAuctionCountdown(lot.auctionDate, nowMs) || "Time TBD"}
                         </span>
-                        {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
+                        <LotTimingMeta lot={lot} nowMs={nowMs} />
                       </TableCell>
                       <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
-                      <TableCell className="col-start-2 row-start-2 p-0 text-[15px] font-semibold leading-snug sm:p-3 sm:text-sm sm:font-normal">{stripTeslaPrefix(lot.carType)}</TableCell>
+                      <TableCell className="col-start-2 row-start-2 p-0 sm:p-3"><LotModelCell lot={lot} /></TableCell>
                       <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
                       <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
                         <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
@@ -385,7 +413,7 @@ export function MainPage({
                       >
                         {formatAuctionCountdown(lot.auctionDate, nowMs) || (lot.auctionDate ? "Time TBD" : "Date pending")}
                       </span>
-                      {lot.modelYear ? <span className="ml-1.5 inline text-[11px] text-muted-foreground sm:ml-0 sm:mt-0.5 sm:block">· MY {lot.modelYear}</span> : null}
+                      <LotTimingMeta lot={lot} nowMs={nowMs} />
                     </TableCell>
                     <TableCell className="col-start-1 row-span-3 row-start-1 self-start p-0 sm:p-3"><ImageCell lot={lot} /></TableCell>
                     <TableCell className="hidden sm:table-cell">
@@ -399,7 +427,7 @@ export function MainPage({
                         />
                       ) : null}
                     </TableCell>
-                    <TableCell className="col-start-2 row-start-2 p-0 text-[15px] font-semibold leading-snug sm:p-3 sm:text-sm sm:font-normal">{stripTeslaPrefix(lot.carType)}</TableCell>
+                    <TableCell className="col-start-2 row-start-2 p-0 sm:p-3"><LotModelCell lot={lot} /></TableCell>
                     <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
                     <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
                       <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
