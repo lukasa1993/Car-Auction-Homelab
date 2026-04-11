@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Model 3 VIN Decoder</title>
+    <title>Tesla VIN Decoder</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
@@ -244,10 +244,10 @@
         <div class="header">
             <h1>
                 <span class="tesla-logo">T</span>
-                Model 3 VIN Decoder
+                Tesla VIN Decoder
             </h1>
             <p style="margin-top: 8px; color: #888; font-size: 14px;">
-                Full or partial VIN &nbsp;•&nbsp; 2017–2026
+                Model 3 &amp; Model Y &nbsp;•&nbsp; Full or partial VIN &nbsp;•&nbsp; 2017–2027
             </p>
         </div>
 
@@ -317,310 +317,264 @@
 
         <!-- Footer -->
         <div class="footer">
-            Based on official Tesla Model 3 Service Manuals (2017–2026)
+            Based on official Tesla Service Manuals — Model 3 (2017–2026) &amp; Model Y (2020–2027)
         </div>
     </div>
 
     <script>
-        // VIN decoding data merged from BOTH official Tesla Model 3 Service Manuals
+        // ── WMI lookup (model-independent) ─────────────────────────────────────
+        const WMI_INFO = {
+            '5YJ': 'Tesla, Inc. – Fremont, CA (USA) / Austin, TX',
+            '7SA': 'Tesla, Inc. – Gigafactory Austin, TX (USA)',
+            'LRW': 'Tesla, Inc. – Gigafactory Shanghai, China',
+            'XP7': 'Tesla, Inc. – Gigafactory Berlin, Germany'
+        };
+        const VALID_WMI   = Object.keys(WMI_INFO);
+        const MODELY_WMI  = ['7SA', 'XP7']; // exclusively Model Y
+
+        // ── Per-era decode tables ───────────────────────────────────────────────
         const vinData = {
-            old: {  // 2017–2023 (and early 2024 per first manual)
-                wmi: {
-                    '5YJ': { meaning: 'Tesla, Inc. – North America (Fremont, CA / Austin, TX)' },
-                    'LRW': { meaning: 'Tesla, Inc. – Gigafactory Shanghai, China' }
-                },
-                year: {
-                    'H': '2017', 'J': '2018', 'K': '2019', 'L': '2020',
-                    'M': '2021', 'N': '2022', 'P': '2023', 'R': '2024'
-                },
-                plant: {
-                    'A': 'Tesla Austin, TX (USA)',
-                    'C': 'Tesla Gigafactory Shanghai (China)',
-                    'F': 'Tesla Fremont, CA (USA)'
-                },
-                motor: {
-                    'A': 'Single Motor Standard (3DU 800A)',
-                    'B': 'Dual Motor Standard',
-                    'C': 'Dual Motor Performance',
-                    'R': 'Single Motor Standard (3DU 600A)',
-                    'S': 'Single Motor Standard (DUB 600A)'
-                },
-                fuel: {
-                    'E': 'Electric (Fremont-built vehicles), Ternary System Li-ion battery (Giga Shanghai-built vehicles)',
-                    'F': 'Lithium Iron Phosphate Battery (Giga Shanghai-built vehicles only)'
-                },
+            // Model 3 – 2017-2024 (pre-Highland)
+            model3_old: {
+                body:      { 'E': 'Sedan 4 DR / LHD', 'F': 'Sedan 4 DR / RHD' },
                 restraint: {
-                    '1': 'Type 2 Manual seat belts (FR, SR*3) with front Airbags, PODS, side Inflatable restraints, Knee Airbags',
-                    '7': 'Type 2 Manual seatbelts (FR, SR*3) with front Airbags, side Inflatable restraints'
+                    '1': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR, Knee',
+                    '7': 'Seatbelts (FR, SR×3) · Airbags, SIR'
                 },
-                body: {
-                    'E': 'Sedan 4 DR / LHD',
-                    'F': 'RHD Sedan 4 DR'
-                }
-            },
-            new: {  // 2024–2026 Highland refresh per second manual
-                wmi: {
-                    '5YJ': { meaning: 'Tesla, Inc. – North America (Fremont, CA)' },
-                    'LRW': { meaning: 'Tesla, Inc. – Gigafactory Shanghai, China' }
-                },
-                year: {
-                    'R': '2024', 'S': '2025', 'T': '2026'
-                },
-                plant: {
-                    'C': 'Tesla Gigafactory Shanghai (China)',
-                    'F': 'Tesla Fremont, CA (USA)'
-                },
+                fuel:  { 'E': 'Electric (Li-ion)', 'F': 'Lithium Iron Phosphate (LFP)' },
                 motor: {
-                    'A': 'Single Motor Standard',
-                    'B': 'Dual Motor Standard',
-                    'J': 'Single Motor Standard',
-                    'K': 'Dual Motor Standard',
-                    'R': 'Single Motor Standard',
-                    'S': 'Single Motor Standard',
+                    'A': 'Single Motor (3DU 800A)', 'B': 'Dual Motor Standard',
+                    'C': 'Dual Motor Performance',  'R': 'Single Motor (3DU 600A)',
+                    'S': 'Single Motor (DUB 600A)'
+                },
+                year:  { 'H':'2017','J':'2018','K':'2019','L':'2020','M':'2021','N':'2022','P':'2023','R':'2024' },
+                plant: { 'A':'Austin, TX (USA)', 'C':'Gigafactory Shanghai (China)', 'F':'Fremont, CA (USA)' }
+            },
+            // Model 3 – 2024-2026 Highland refresh
+            model3_new: {
+                body:      { 'E': 'Sedan 4 DR / LHD', 'F': 'Sedan 4 DR / RHD' },
+                restraint: {
+                    '1': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR, Knee',
+                    '7': 'Seatbelts (FR, SR×3) · Airbags, SIR'
+                },
+                fuel:  { 'E': 'Li-Ion Battery', 'F': 'Lithium Iron Phosphate (LFP)' },
+                motor: {
+                    'A': 'Single Motor Standard', 'B': 'Dual Motor Standard',
+                    'J': 'Single Motor Standard',  'K': 'Dual Motor Standard',
+                    'R': 'Single Motor Standard',  'S': 'Single Motor Standard',
                     'T': 'Dual Motor Performance'
                 },
-                fuel: {
-                    'E': 'Li-Ion Battery',
-                    'F': 'Lithium Iron Phosphate Battery'
-                },
+                year:  { 'R':'2024','S':'2025','T':'2026' },
+                plant: { 'C':'Gigafactory Shanghai (China)', 'F':'Fremont, CA (USA)' }
+            },
+            // Model Y – 2020-2025 (older manual)
+            modelY_old: {
+                body:      { 'G': 'MPV 5 DR / LHD', 'H': 'MPV 5 DR / RHD' },
                 restraint: {
-                    '1': 'Type 2 Manual Seatbelts (FR, SR*3) with Front Airbags, Side Inflatable Restraints, Knee Airbags (FR)',
-                    '7': 'Type 2 Manual Seatbelts (FR, SR*3) with Front Airbags, Side Inflatable Restraints'
+                    'A': 'Seatbelts (FR, SR×3, TR×2) · Airbags, PODS, SIR, Knee',
+                    'C': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR',
+                    'D': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR, Knee'
                 },
-                body: {
-                    'E': 'Sedan 4 DR / LHD',
-                    'F': 'RHD Sedan 4 DR'
-                }
+                fuel:  { 'E': 'Electric (Li-ion)', 'F': 'Lithium Iron Phosphate (LFP)' },
+                motor: {
+                    'D': 'Single Motor Standard',         'E': 'Dual Motor Standard',
+                    'F': 'Dual Motor Performance (3DU 800A)', 'J': 'Single Motor Standard',
+                    'K': 'Dual Motor Standard',           'L': 'Dual Motor Performance',
+                    'R': 'Single Motor (3DU 600A)',        'S': 'Single Motor (DUB 600A)'
+                },
+                year:  { 'H':'2017','J':'2018','K':'2019','L':'2020','M':'2021','N':'2022','P':'2023','R':'2024','S':'2025' },
+                plant: { 'A':'Austin, TX (USA)', 'B':'Gigafactory Berlin (Germany)', 'C':'Gigafactory Shanghai (China)', 'F':'Fremont, CA (USA)' }
+            },
+            // Model Y – 2025-2027 (newer manual)
+            modelY_new: {
+                body:      { 'G': 'Class D MPV / 5 DR / LHD', 'H': 'Class D MPV / 5 DR / RHD' },
+                restraint: {
+                    'A': 'Seatbelts (FR, SR×3, TR×2) · Airbags, PODS, SIR, Knee',
+                    'B': 'Seatbelts (FR, SR×2, TR×2) · Airbags, PODS, SIR, Knee',
+                    'C': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR',
+                    'D': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR, Knee'
+                },
+                fuel:  { 'E': 'Ternary System Li-Ion Battery', 'F': 'Lithium Iron Phosphate (LFP)' },
+                motor: {
+                    'D': 'Single Motor Standard', 'E': 'Dual Motor Standard',
+                    'F': 'Dual Motor Performance', 'J': 'Single Motor Standard',
+                    'K': 'Dual Motor Standard',    'L': 'Dual Motor Performance',
+                    'R': 'Single Motor Standard',  'S': 'Single Motor Standard'
+                },
+                year:  { 'S':'2025','T':'2026','V':'2027' },
+                plant: { 'A':'Austin, TX (USA)', 'B':'Gigafactory Berlin (Germany)', 'C':'Gigafactory Shanghai (China)', 'F':'Fremont, CA (USA)' }
             }
         };
 
+        const ERA_LABELS = {
+            model3_old: 'Model 3 · 2017–2024',
+            model3_new: 'Model 3 · Highland 2024–2026',
+            modelY_old: 'Model Y · 2020–2025',
+            modelY_new: 'Model Y · 2025–2027'
+        };
+
+        // ── Core decoder ────────────────────────────────────────────────────────
         const vinInput = document.getElementById('vinInput');
         const statusEl = document.getElementById('status');
         const resultEl = document.getElementById('decodeResult');
 
         function decodeVIN(vin) {
             if (vin.length < 3) return null;
+            const v = vin.toUpperCase();
+            const wmi = v.substring(0, 3);
+            if (!VALID_WMI.includes(wmi)) return null;
 
-            const upperVIN = vin.toUpperCase();
-            const wmi = upperVIN.substring(0, 3);
+            const providedLen = v.length;
+            const modelCode   = providedLen >= 4  ? v[3]  : null;
+            const yearCode    = providedLen >= 10 ? v[9]  : null;
 
-            if (!['5YJ', 'LRW'].includes(wmi)) return null;
+            // Determine model: position 4 wins; fallback to WMI exclusivity
+            let model = null;
+            if      (modelCode === '3') model = 'model3';
+            else if (modelCode === 'Y') model = 'modelY';
+            else if (MODELY_WMI.includes(wmi)) model = 'modelY';
 
-            const providedLen = upperVIN.length;
-            const yearCode = providedLen >= 10 ? upperVIN[9] : null;
-
-            // Determine era (new manual for 2024+ Highland)
-            let era = 'old';
-            if (yearCode && ['R', 'S', 'T'].includes(yearCode)) {
-                era = 'new';
+            // Determine era (default to _old until year code confirms _new)
+            let era = null;
+            if (model === 'model3') {
+                era = (yearCode && ['R','S','T'].includes(yearCode)) ? 'model3_new' : 'model3_old';
+            } else if (model === 'modelY') {
+                era = (yearCode && ['S','T','V'].includes(yearCode)) ? 'modelY_new' : 'modelY_old';
             }
 
-            const data = vinData[era];
+            const data = era ? vinData[era] : null;
+            const lookup = (table, key) => (data && key !== null) ? (data[table][key] || 'Unknown') : null;
 
             return {
-                vin: upperVIN,
-                providedLen: providedLen,
+                v, providedLen,
                 isPartial: providedLen < 17,
-                era: era,
-                wmi: wmi,
-                wmiData: data.wmi[wmi],
-
-                // Position 4 – Model 3
-                modelCode: providedLen >= 4 ? upperVIN[3] : null,
-                isModel3: providedLen >= 4 ? (upperVIN[3] === '3') : null,
-
-                // Position 5 – Body
-                bodyCode: providedLen >= 5 ? upperVIN[4] : null,
-                body: providedLen >= 5 ? (data.body[upperVIN[4]] || 'Unknown') : null,
-
-                // Position 6 – Restraint
-                restraintCode: providedLen >= 6 ? upperVIN[5] : null,
-                restraint: providedLen >= 6 ? (data.restraint[upperVIN[5]] || 'Unknown') : null,
-
-                // Position 7 – Fuel / Battery
-                fuelCode: providedLen >= 7 ? upperVIN[6] : null,
-                fuel: providedLen >= 7 ? (data.fuel[upperVIN[6]] || 'Unknown') : null,
-
-                // Position 8 – Motor
-                motorCode: providedLen >= 8 ? upperVIN[7] : null,
-                motorData: providedLen >= 8 ? (data.motor[upperVIN[7]] || 'Unknown') : null,
-
-                // Position 9 – Check digit
-                checkDigit: providedLen >= 9 ? upperVIN[8] : null,
-
-                // Position 10 – Year
-                yearCode: yearCode,
-                year: yearCode ? (data.year[yearCode] || 'Unknown') : null,
-
-                // Position 11 – Plant
-                plantCode: providedLen >= 11 ? upperVIN[10] : null,
-                plantData: providedLen >= 11 ? (data.plant[upperVIN[10]] || 'Unknown') : null,
-
-                // Positions 12-17 – Sequence
-                sequence: providedLen >= 12 ? upperVIN.substring(11) : null
+                model, era, wmi,
+                wmiMeaning: WMI_INFO[wmi],
+                modelCode,
+                bodyCode:      providedLen >= 5  ? v[4]  : null,
+                body:          lookup('body', providedLen >= 5 ? v[4] : null),
+                restraintCode: providedLen >= 6  ? v[5]  : null,
+                restraint:     lookup('restraint', providedLen >= 6 ? v[5] : null),
+                fuelCode:      providedLen >= 7  ? v[6]  : null,
+                fuel:          lookup('fuel', providedLen >= 7 ? v[6] : null),
+                motorCode:     providedLen >= 8  ? v[7]  : null,
+                motorData:     lookup('motor', providedLen >= 8 ? v[7] : null),
+                checkDigit:    providedLen >= 9  ? v[8]  : null,
+                yearCode,
+                year:          lookup('year', yearCode),
+                plantCode:     providedLen >= 11 ? v[10] : null,
+                plantData:     lookup('plant', providedLen >= 11 ? v[10] : null),
+                sequence:      providedLen >= 12 ? v.substring(11) : null
             };
         }
 
+        // ── Render ──────────────────────────────────────────────────────────────
         function renderResult(decoded) {
-            if (!decoded) {
-                resultEl.style.display = 'none';
-                return;
-            }
-
+            if (!decoded) { resultEl.style.display = 'none'; return; }
             resultEl.style.display = 'block';
 
-            // === Quick Summary Cards (handle partial) ===
+            // WMI card
+            document.getElementById('wmiValue').textContent   = decoded.wmi;
+            document.getElementById('wmiMeaning').textContent = decoded.wmiMeaning;
 
-            // WMI (always present)
-            document.getElementById('wmiValue').textContent = decoded.wmi;
-            document.getElementById('wmiMeaning').textContent = decoded.wmiData.meaning;
-
-            // Year
+            // Year card
             const yearValueEl = document.getElementById('yearValue');
-            const yearNoteEl = document.getElementById('yearNote');
+            const yearNoteEl  = document.getElementById('yearNote');
             if (decoded.year) {
                 yearValueEl.textContent = decoded.year;
-                if (decoded.era === 'new') {
-                    yearNoteEl.innerHTML = `<strong>Position 10:</strong> ${decoded.yearCode} • Model year (2024+ Highland)`;
-                } else {
-                    const yearType = (decoded.plantCode === 'C') ? 'Calendar year' : 'Model year';
-                    yearNoteEl.innerHTML = `<strong>Position 10:</strong> ${decoded.yearCode} • ${yearType}`;
-                }
+                const isShanghaiBerlin = ['C','B'].includes(decoded.plantCode);
+                const yearType = isShanghaiBerlin ? 'Calendar year' : 'Model year';
+                yearNoteEl.innerHTML = `<strong>Pos 10:</strong> ${decoded.yearCode} · ${yearType}`;
             } else {
                 yearValueEl.textContent = '—';
                 yearNoteEl.innerHTML = '<span class="missing">Not in VIN</span>';
             }
 
-            // Plant
-            const plantValueEl = document.getElementById('plantValue');
-            const plantMeaningEl = document.getElementById('plantMeaning');
+            // Plant card
+            const plantValueEl  = document.getElementById('plantValue');
+            const plantMeaning = document.getElementById('plantMeaning');
             if (decoded.plantCode) {
-                plantValueEl.innerHTML = `${decoded.plantCode} <span style="font-size:15px;color:#888">(${decoded.plantData})</span>`;
-                plantMeaningEl.textContent = decoded.wmi === '5YJ' ? 'North America' : 'Gigafactory Shanghai';
+                plantValueEl.textContent  = decoded.plantCode;
+                plantMeaning.textContent  = decoded.plantData;
             } else {
                 plantValueEl.textContent = '—';
-                plantMeaningEl.innerHTML = '<span class="missing">Not in VIN</span>';
+                plantMeaning.innerHTML   = '<span class="missing">Not in VIN</span>';
             }
 
-            // Motor
-            const motorValueEl = document.getElementById('motorValue');
+            // Motor card
+            const motorValueEl  = document.getElementById('motorValue');
             const motorMeaningEl = document.getElementById('motorMeaning');
             if (decoded.motorCode) {
-                motorValueEl.textContent = decoded.motorCode;
+                motorValueEl.textContent   = decoded.motorCode;
                 motorMeaningEl.textContent = decoded.motorData;
             } else {
                 motorValueEl.textContent = '—';
                 motorMeaningEl.innerHTML = '<span class="missing">Not in VIN</span>';
             }
 
-            // === Era badge (only when year is known) ===
+            // Era badge
             const eraBadge = document.getElementById('eraBadge');
-            if (decoded.yearCode) {
+            if (decoded.era) {
                 eraBadge.style.display = 'inline-flex';
-                eraBadge.innerHTML = decoded.era === 'new'
-                    ? `2024–2026 Highland`
-                    : `2017–2024`;
-                if (decoded.isPartial) eraBadge.classList.add('partial-badge');
+                eraBadge.textContent   = ERA_LABELS[decoded.era];
+                eraBadge.classList.toggle('partial-badge', decoded.isPartial);
+            } else if (decoded.model) {
+                eraBadge.style.display = 'inline-flex';
+                eraBadge.textContent   = decoded.model === 'model3' ? 'Model 3' : 'Model Y';
+                eraBadge.classList.remove('partial-badge');
             } else {
                 eraBadge.style.display = 'none';
             }
 
-            // === Full Breakdown Table (supports partial) ===
+            // Full breakdown table
             const tbody = document.getElementById('tableBody');
-            let tableHTML = '';
+            let html = '';
 
-            // Row 1-3: WMI
-            tableHTML += `
-                <tr>
-                    <td><span class="position">1-3</span></td>
-                    <td><strong>${decoded.wmi}</strong></td>
-                    <td><strong>${decoded.wmiData.meaning}</strong></td>
-                </tr>`;
+            html += row('1–3', decoded.wmi, decoded.wmiMeaning);
 
-            // Row 4: Model 3
-            const modelCodeDisplay = decoded.modelCode !== null ? `<strong>${decoded.modelCode}</strong>` : '—';
-            const modelMeaning = decoded.modelCode !== null
-                ? (decoded.isModel3 ? '<strong>Model 3</strong>' : '<span style="color:#ff4444">Not Model 3</span>')
-                : '<span class="missing">Not provided</span>';
-            tableHTML += `
-                <tr>
-                    <td><span class="position">4</span></td>
-                    <td>${modelCodeDisplay}</td>
-                    <td>${modelMeaning}</td>
-                </tr>`;
+            // Pos 4: model line
+            const modelLabel = decoded.modelCode === '3' ? '<strong>Model 3</strong>'
+                             : decoded.modelCode === 'Y' ? '<strong>Model Y</strong>'
+                             : decoded.modelCode !== null ? `<span style="color:#ff4444">Unknown model (${decoded.modelCode})</span>`
+                             : null;
+            html += row('4', decoded.modelCode, modelLabel, 'Model line');
 
-            // Row 5: Body
-            tableHTML += createRow(5, decoded.bodyCode, decoded.body, 'Body style');
+            html += row('5',  decoded.bodyCode,      decoded.body,      'Body style');
+            html += row('6',  decoded.restraintCode, decoded.restraint, 'Restraint system');
+            html += row('7',  decoded.fuelCode,      decoded.fuel,      'Battery type');
+            html += row('8',  decoded.motorCode,     decoded.motorData, 'Motor / Drive unit');
+            html += row('9',  decoded.checkDigit,    decoded.checkDigit ? 'Check digit' : null, 'Check digit');
+            html += row('10', decoded.yearCode,      decoded.year ? `<strong>${decoded.year}</strong>` : null, 'Model / Calendar year');
+            html += row('11', decoded.plantCode,     decoded.plantData, 'Manufacturing plant');
 
-            // Row 6: Restraint
-            tableHTML += createRow(6, decoded.restraintCode, decoded.restraint, 'Restraint system');
+            const seqMeaning = decoded.sequence !== null ? 'Production sequence' : null;
+            html += row('12–17', decoded.sequence, seqMeaning, 'Sequence number');
 
-            // Row 7: Fuel
-            tableHTML += createRow(7, decoded.fuelCode, decoded.fuel, 'Battery / Fuel type');
-
-            // Row 8: Motor
-            tableHTML += createRow(8, decoded.motorCode, decoded.motorData, 'Motor / Drive unit');
-
-            // Row 9: Check digit
-            tableHTML += createRow(9, decoded.checkDigit, 'Check digit (validates VIN)', null);
-
-            // Row 10: Year
-            tableHTML += createRow(10, decoded.yearCode, decoded.year ? `<strong>${decoded.year}</strong>` : null, 'Model / Calendar year');
-
-            // Row 11: Plant
-            tableHTML += createRow(11, decoded.plantCode, decoded.plantData, 'Manufacturing plant');
-
-            // Row 12-17: Sequence
-            const seqDisplay = decoded.sequence !== null ? `<strong>${decoded.sequence}</strong>` : '—';
-            const seqMeaning = decoded.sequence !== null
-                ? 'Production sequence number'
-                : '<span class="missing">Not in VIN</span>';
-            tableHTML += `
-                <tr>
-                    <td><span class="position">12-17</span></td>
-                    <td>${seqDisplay}</td>
-                    <td>${seqMeaning}</td>
-                </tr>`;
-
-            tbody.innerHTML = tableHTML;
+            tbody.innerHTML = html;
         }
 
-        // Helper to create table row for partial support
-        function createRow(pos, code, meaning, fallbackMeaning) {
-            const codeHTML = code !== null ? `<strong>${code}</strong>` : '—';
-            let meaningHTML = '';
-
-            if (meaning !== null) {
-                meaningHTML = meaning;
-            } else if (fallbackMeaning) {
-                meaningHTML = `<span class="missing">${fallbackMeaning}</span>`;
-            } else {
-                meaningHTML = '<span class="missing">Not in VIN</span>';
-            }
-
-            return `
-                <tr>
-                    <td><span class="position">${pos}</span></td>
-                    <td>${codeHTML}</td>
-                    <td>${meaningHTML}</td>
-                </tr>`;
+        function row(pos, code, meaning, fallback) {
+            const codeHTML = code != null ? `<strong>${code}</strong>` : '—';
+            const meanHTML = meaning != null ? meaning
+                           : fallback        ? `<span class="missing">${fallback}</span>`
+                           :                   '<span class="missing">Not in VIN</span>';
+            return `<tr>
+                <td><span class="position">${pos}</span></td>
+                <td>${codeHTML}</td>
+                <td>${meanHTML}</td>
+            </tr>`;
         }
 
+        // ── Live input handler ──────────────────────────────────────────────────
         function updateDecoder() {
             let vin = vinInput.value.trim();
+            if (vin !== vin.toUpperCase()) { vinInput.value = vin = vin.toUpperCase(); }
 
-            // Auto-uppercase as user types
-            if (vin !== vin.toUpperCase()) {
-                vinInput.value = vin.toUpperCase();
-                vin = vinInput.value;
-            }
-
-            if (vin.length === 0) {
+            if (!vin) {
                 statusEl.innerHTML = '';
                 resultEl.style.display = 'none';
                 return;
             }
-
             if (vin.length < 3) {
                 statusEl.innerHTML = `<span class="warning">Enter at least 3 characters</span>`;
                 resultEl.style.display = 'none';
@@ -628,16 +582,16 @@
             }
 
             const decoded = decodeVIN(vin);
-
             if (!decoded) {
-                statusEl.innerHTML = `<span class="error">Not a Model 3 VIN — must start with 5YJ or LRW</span>`;
+                statusEl.innerHTML = `<span class="error">Unknown WMI — expected 5YJ, 7SA, LRW, or XP7</span>`;
                 resultEl.style.display = 'none';
                 return;
             }
 
-            // Model 3 check (only if position 4 is provided)
-            if (decoded.modelCode !== null && !decoded.isModel3) {
-                statusEl.innerHTML = `<span class="warning">Position 4 is not 3 — may not be a Model 3</span>`;
+            if (!decoded.model && decoded.modelCode !== null) {
+                statusEl.innerHTML = `<span class="warning">Unknown model code "${decoded.modelCode}" at position 4</span>`;
+            } else if (!decoded.model) {
+                statusEl.innerHTML = `<span class="warning">Detected Tesla WMI — enter position 4 (3 = Model 3, Y = Model Y)</span>`;
             } else if (decoded.isPartial) {
                 statusEl.innerHTML = `<span class="success">Partial VIN — ${decoded.providedLen} of 17 characters</span>`;
             } else {
@@ -647,13 +601,8 @@
             renderResult(decoded);
         }
 
-        // Real-time decoding
         vinInput.addEventListener('input', updateDecoder);
-
-        // Initial check in case of pre-filled value
-        window.onload = () => {
-            if (vinInput.value.trim()) updateDecoder();
-        };
+        window.onload = () => { if (vinInput.value.trim()) updateDecoder(); };
     </script>
 </body>
 </html>
