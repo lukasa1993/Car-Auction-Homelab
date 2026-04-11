@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tesla Model 3 VIN Decoder</title>
+    <title>Model 3 VIN Decoder</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
@@ -36,6 +36,20 @@
             box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
             overflow: hidden;
             border: 1px solid #333;
+        }
+
+        @media (max-width: 600px) {
+            body { padding: 0; align-items: flex-start; }
+            .container { border-radius: 0; border-left: none; border-right: none; min-height: 100vh; }
+            .header { padding: 20px 20px; }
+            .header h1 { font-size: 22px; }
+            .input-area { padding: 20px; }
+            .vin-input { font-size: 18px; letter-spacing: 2px; padding: 14px 16px; }
+            .decode-result { padding: 0 20px 32px; }
+            .result-grid { grid-template-columns: 1fr; }
+            .full-breakdown { overflow-x: auto; }
+            .breakdown-table th, .breakdown-table td { padding: 10px 14px; font-size: 13px; }
+            .footer { padding: 16px 20px; }
         }
 
         .header {
@@ -232,9 +246,8 @@
                 <span class="tesla-logo">T</span>
                 Model 3 VIN Decoder
             </h1>
-            <p style="margin-top: 8px; color: #888; font-size: 15px;">
-                Instant decode • Official Tesla Service Manuals (2017–2023 + 2024–2026)<br>
-                <strong>Full VIN + Partial VIN support</strong> (first 4–16 characters work)
+            <p style="margin-top: 8px; color: #888; font-size: 14px;">
+                Full or partial VIN &nbsp;•&nbsp; 2017–2026
             </p>
         </div>
 
@@ -244,7 +257,7 @@
                 type="text"
                 id="vinInput"
                 class="vin-input"
-                placeholder="5YJ3E1EA0JF000001  or  partial e.g. 5YJ3E1EA0J"
+                placeholder="5YJ3E1EA0JF000001"
                 maxlength="17"
                 autocomplete="off">
 
@@ -292,7 +305,7 @@
                         <tr>
                             <th style="width: 70px;">Pos</th>
                             <th style="width: 80px;">Code</th>
-                            <th>Meaning (from official manual)</th>
+                            <th>Meaning</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody">
@@ -304,10 +317,7 @@
 
         <!-- Footer -->
         <div class="footer">
-            Based on two official Tesla Model 3 Service Manuals:<br>
-            • 2017–2023/early-2024 (GUID-0C797294…)<br>
-            • 2024–2026 Highland refresh (GUID-B7B9507C…)<br>
-            <span style="font-size: 12px;">Supports full 17-character VINs and partial prefixes • Real-time decoding</span>
+            Based on official Tesla Model 3 Service Manuals (2017–2026)
         </div>
     </div>
 
@@ -478,7 +488,7 @@
                 }
             } else {
                 yearValueEl.textContent = '—';
-                yearNoteEl.innerHTML = '<span class="missing">Position 10 not provided (partial VIN)</span>';
+                yearNoteEl.innerHTML = '<span class="missing">Not in VIN</span>';
             }
 
             // Plant
@@ -489,7 +499,7 @@
                 plantMeaningEl.textContent = decoded.wmi === '5YJ' ? 'North America' : 'Gigafactory Shanghai';
             } else {
                 plantValueEl.textContent = '—';
-                plantMeaningEl.innerHTML = '<span class="missing">Position 11 not provided (partial VIN)</span>';
+                plantMeaningEl.innerHTML = '<span class="missing">Not in VIN</span>';
             }
 
             // Motor
@@ -500,7 +510,7 @@
                 motorMeaningEl.textContent = decoded.motorData;
             } else {
                 motorValueEl.textContent = '—';
-                motorMeaningEl.innerHTML = '<span class="missing">Position 8 not provided (partial VIN)</span>';
+                motorMeaningEl.innerHTML = '<span class="missing">Not in VIN</span>';
             }
 
             // === Era badge (only when year is known) ===
@@ -508,8 +518,8 @@
             if (decoded.yearCode) {
                 eraBadge.style.display = 'inline-flex';
                 eraBadge.innerHTML = decoded.era === 'new'
-                    ? `🚀 2024–2026 Highland refresh`
-                    : `📅 2017–2024`;
+                    ? `2024–2026 Highland`
+                    : `2017–2024`;
                 if (decoded.isPartial) eraBadge.classList.add('partial-badge');
             } else {
                 eraBadge.style.display = 'none';
@@ -564,7 +574,7 @@
             const seqDisplay = decoded.sequence !== null ? `<strong>${decoded.sequence}</strong>` : '—';
             const seqMeaning = decoded.sequence !== null
                 ? 'Production sequence number'
-                : '<span class="missing">Not provided (partial VIN)</span>';
+                : '<span class="missing">Not in VIN</span>';
             tableHTML += `
                 <tr>
                     <td><span class="position">12-17</span></td>
@@ -583,9 +593,9 @@
             if (meaning !== null) {
                 meaningHTML = meaning;
             } else if (fallbackMeaning) {
-                meaningHTML = `<span class="missing">${fallbackMeaning} – not provided</span>`;
+                meaningHTML = `<span class="missing">${fallbackMeaning}</span>`;
             } else {
-                meaningHTML = '<span class="missing">Not provided (partial VIN)</span>';
+                meaningHTML = '<span class="missing">Not in VIN</span>';
             }
 
             return `
@@ -612,7 +622,7 @@
             }
 
             if (vin.length < 3) {
-                statusEl.innerHTML = `<span class="warning">Type at least 3 characters to start decoding (WMI)</span>`;
+                statusEl.innerHTML = `<span class="warning">Enter at least 3 characters</span>`;
                 resultEl.style.display = 'none';
                 return;
             }
@@ -620,18 +630,18 @@
             const decoded = decodeVIN(vin);
 
             if (!decoded) {
-                statusEl.innerHTML = `<span class="error">Invalid WMI – must start with 5YJ or LRW</span>`;
+                statusEl.innerHTML = `<span class="error">Not a Model 3 VIN — must start with 5YJ or LRW</span>`;
                 resultEl.style.display = 'none';
                 return;
             }
 
             // Model 3 check (only if position 4 is provided)
             if (decoded.modelCode !== null && !decoded.isModel3) {
-                statusEl.innerHTML = `<span class="warning">⚠️ WMI valid but position 4 ≠ 3 (may not be Model 3) • Partial decode still shown</span>`;
+                statusEl.innerHTML = `<span class="warning">Position 4 is not 3 — may not be a Model 3</span>`;
             } else if (decoded.isPartial) {
-                statusEl.innerHTML = `<span class="success">✓ Partial VIN decoded (${decoded.providedLen}/17 characters)</span>`;
+                statusEl.innerHTML = `<span class="success">Partial VIN — ${decoded.providedLen} of 17 characters</span>`;
             } else {
-                statusEl.innerHTML = `<span class="success">✓ Full Tesla Model 3 VIN decoded • ${decoded.era === 'new' ? '2024–2026 manual' : '2017–2024 manual'}</span>`;
+                statusEl.innerHTML = `<span class="success">Full VIN decoded</span>`;
             }
 
             renderResult(decoded);
