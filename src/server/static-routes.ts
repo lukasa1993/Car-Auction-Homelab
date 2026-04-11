@@ -15,7 +15,7 @@ export function handleStaticRequest(pathname: string, services: ServerServices):
             path: services.config.appJsOutput,
             contentType: "text/javascript; charset=utf-8",
           }
-        : pathname === "/vin.html"
+        : pathname === "/vin.html" || pathname === "/vin"
           ? {
               path: `${services.config.publicDir}/vin.html`,
               contentType: "text/html; charset=utf-8",
