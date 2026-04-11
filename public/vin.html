@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesla Model 3 VIN Decoder</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+        :root {
+            --tesla-red: #cc0000;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #111111, #1a1a1a);
+            color: #fff;
+            min-height: 100vh;
+            padding: 40px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 780px;
+            width: 100%;
+            background: #1f1f1f;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+
+        .header {
+            background: #111;
+            padding: 28px 32px;
+            text-align: center;
+            border-bottom: 1px solid #333;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .tesla-logo {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--tesla-red);
+        }
+
+        .input-area {
+            padding: 32px;
+            background: #1f1f1f;
+        }
+
+        .vin-input {
+            width: 100%;
+            padding: 18px 24px;
+            font-size: 24px;
+            font-weight: 500;
+            letter-spacing: 4px;
+            background: #111;
+            border: 2px solid #444;
+            border-radius: 12px;
+            color: #fff;
+            text-transform: uppercase;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .vin-input:focus {
+            outline: none;
+            border-color: var(--tesla-red);
+            box-shadow: 0 0 0 4px rgba(204, 0, 0, 0.2);
+        }
+
+        .vin-input::placeholder {
+            color: #666;
+            letter-spacing: 2px;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 12px;
+            font-size: 15px;
+            font-weight: 500;
+            min-height: 24px;
+        }
+
+        .decode-result {
+            padding: 0 32px 40px;
+            display: none;
+        }
+
+        .era-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #222;
+            color: #fff;
+            font-size: 13px;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            margin-top: 8px;
+        }
+
+        .partial-badge {
+            background: #f59e0b;
+            color: #111;
+            font-weight: 600;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+        }
+
+        .info-card {
+            background: #111;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #333;
+        }
+
+        .info-card h3 {
+            font-size: 15px;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .info-card .value {
+            font-size: 22px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .info-card .meaning {
+            font-size: 15px;
+            color: #ccc;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+
+        .full-breakdown {
+            margin-top: 32px;
+        }
+
+        .breakdown-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #111;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .breakdown-table th,
+        .breakdown-table td {
+            padding: 14px 20px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+
+        .breakdown-table th {
+            background: #1a1a1a;
+            font-weight: 500;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+        }
+
+        .breakdown-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .position {
+            font-family: monospace;
+            background: #222;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 15px;
+        }
+
+        .missing {
+            color: #777;
+            font-style: italic;
+        }
+
+        .footer {
+            padding: 20px 32px;
+            background: #111;
+            text-align: center;
+            font-size: 13px;
+            color: #666;
+            border-top: 1px solid #333;
+        }
+
+        .error {
+            color: #ff4444;
+        }
+
+        .success {
+            color: #22cc88;
+        }
+
+        .warning {
+            color: #f59e0b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                <span class="tesla-logo">T</span>
+                Model 3 VIN Decoder
+            </h1>
+            <p style="margin-top: 8px; color: #888; font-size: 15px;">
+                Instant decode • Official Tesla Service Manuals (2017–2023 + 2024–2026)<br>
+                <strong>Full VIN + Partial VIN support</strong> (first 4–16 characters work)
+            </p>
+        </div>
+
+        <!-- Input -->
+        <div class="input-area">
+            <input
+                type="text"
+                id="vinInput"
+                class="vin-input"
+                placeholder="5YJ3E1EA0JF000001  or  partial e.g. 5YJ3E1EA0J"
+                maxlength="17"
+                autocomplete="off">
+
+            <div id="status" class="status"></div>
+        </div>
+
+        <!-- Results -->
+        <div id="decodeResult" class="decode-result">
+
+            <!-- Quick Summary Cards -->
+            <div class="result-grid">
+                <div class="info-card">
+                    <h3>World Manufacturer</h3>
+                    <div id="wmiValue" class="value"></div>
+                    <div id="wmiMeaning" class="meaning"></div>
+                </div>
+
+                <div class="info-card">
+                    <h3>Model Year</h3>
+                    <div id="yearValue" class="value"></div>
+                    <div id="yearNote" class="meaning"></div>
+                </div>
+
+                <div class="info-card">
+                    <h3>Manufacturing Plant</h3>
+                    <div id="plantValue" class="value"></div>
+                    <div id="plantMeaning" class="meaning"></div>
+                </div>
+
+                <div class="info-card">
+                    <h3>Motor / Drive Unit</h3>
+                    <div id="motorValue" class="value"></div>
+                    <div id="motorMeaning" class="meaning"></div>
+                </div>
+            </div>
+
+            <!-- Full Breakdown Table -->
+            <div class="full-breakdown">
+                <h2 style="font-size: 18px; margin-bottom: 12px; padding-left: 4px;">
+                    Full VIN Breakdown
+                    <span id="eraBadge" class="era-badge" style="display:none;"></span>
+                </h2>
+                <table class="breakdown-table" id="breakdownTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 70px;">Pos</th>
+                            <th style="width: 80px;">Code</th>
+                            <th>Meaning (from official manual)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            Based on two official Tesla Model 3 Service Manuals:<br>
+            • 2017–2023/early-2024 (GUID-0C797294…)<br>
+            • 2024–2026 Highland refresh (GUID-B7B9507C…)<br>
+            <span style="font-size: 12px;">Supports full 17-character VINs and partial prefixes • Real-time decoding</span>
+        </div>
+    </div>
+
+    <script>
+        // VIN decoding data merged from BOTH official Tesla Model 3 Service Manuals
+        const vinData = {
+            old: {  // 2017–2023 (and early 2024 per first manual)
+                wmi: {
+                    '5YJ': { meaning: 'Tesla, Inc. – North America (Fremont, CA / Austin, TX)' },
+                    'LRW': { meaning: 'Tesla, Inc. – Gigafactory Shanghai, China' }
+                },
+                year: {
+                    'H': '2017', 'J': '2018', 'K': '2019', 'L': '2020',
+                    'M': '2021', 'N': '2022', 'P': '2023', 'R': '2024'
+                },
+                plant: {
+                    'A': 'Tesla Austin, TX (USA)',
+                    'C': 'Tesla Gigafactory Shanghai (China)',
+                    'F': 'Tesla Fremont, CA (USA)'
+                },
+                motor: {
+                    'A': 'Single Motor Standard (3DU 800A)',
+                    'B': 'Dual Motor Standard',
+                    'C': 'Dual Motor Performance',
+                    'R': 'Single Motor Standard (3DU 600A)',
+                    'S': 'Single Motor Standard (DUB 600A)'
+                },
+                fuel: {
+                    'E': 'Electric (Fremont-built vehicles), Ternary System Li-ion battery (Giga Shanghai-built vehicles)',
+                    'F': 'Lithium Iron Phosphate Battery (Giga Shanghai-built vehicles only)'
+                },
+                restraint: {
+                    '1': 'Type 2 Manual seat belts (FR, SR*3) with front Airbags, PODS, side Inflatable restraints, Knee Airbags',
+                    '7': 'Type 2 Manual seatbelts (FR, SR*3) with front Airbags, side Inflatable restraints'
+                },
+                body: {
+                    'E': 'Sedan 4 DR / LHD',
+                    'F': 'RHD Sedan 4 DR'
+                }
+            },
+            new: {  // 2024–2026 Highland refresh per second manual
+                wmi: {
+                    '5YJ': { meaning: 'Tesla, Inc. – North America (Fremont, CA)' },
+                    'LRW': { meaning: 'Tesla, Inc. – Gigafactory Shanghai, China' }
+                },
+                year: {
+                    'R': '2024', 'S': '2025', 'T': '2026'
+                },
+                plant: {
+                    'C': 'Tesla Gigafactory Shanghai (China)',
+                    'F': 'Tesla Fremont, CA (USA)'
+                },
+                motor: {
+                    'A': 'Single Motor Standard',
+                    'B': 'Dual Motor Standard',
+                    'J': 'Single Motor Standard',
+                    'K': 'Dual Motor Standard',
+                    'R': 'Single Motor Standard',
+                    'S': 'Single Motor Standard',
+                    'T': 'Dual Motor Performance'
+                },
+                fuel: {
+                    'E': 'Li-Ion Battery',
+                    'F': 'Lithium Iron Phosphate Battery'
+                },
+                restraint: {
+                    '1': 'Type 2 Manual Seatbelts (FR, SR*3) with Front Airbags, Side Inflatable Restraints, Knee Airbags (FR)',
+                    '7': 'Type 2 Manual Seatbelts (FR, SR*3) with Front Airbags, Side Inflatable Restraints'
+                },
+                body: {
+                    'E': 'Sedan 4 DR / LHD',
+                    'F': 'RHD Sedan 4 DR'
+                }
+            }
+        };
+
+        const vinInput = document.getElementById('vinInput');
+        const statusEl = document.getElementById('status');
+        const resultEl = document.getElementById('decodeResult');
+
+        function decodeVIN(vin) {
+            if (vin.length < 3) return null;
+
+            const upperVIN = vin.toUpperCase();
+            const wmi = upperVIN.substring(0, 3);
+
+            if (!['5YJ', 'LRW'].includes(wmi)) return null;
+
+            const providedLen = upperVIN.length;
+            const yearCode = providedLen >= 10 ? upperVIN[9] : null;
+
+            // Determine era (new manual for 2024+ Highland)
+            let era = 'old';
+            if (yearCode && ['R', 'S', 'T'].includes(yearCode)) {
+                era = 'new';
+            }
+
+            const data = vinData[era];
+
+            return {
+                vin: upperVIN,
+                providedLen: providedLen,
+                isPartial: providedLen < 17,
+                era: era,
+                wmi: wmi,
+                wmiData: data.wmi[wmi],
+
+                // Position 4 – Model 3
+                modelCode: providedLen >= 4 ? upperVIN[3] : null,
+                isModel3: providedLen >= 4 ? (upperVIN[3] === '3') : null,
+
+                // Position 5 – Body
+                bodyCode: providedLen >= 5 ? upperVIN[4] : null,
+                body: providedLen >= 5 ? (data.body[upperVIN[4]] || 'Unknown') : null,
+
+                // Position 6 – Restraint
+                restraintCode: providedLen >= 6 ? upperVIN[5] : null,
+                restraint: providedLen >= 6 ? (data.restraint[upperVIN[5]] || 'Unknown') : null,
+
+                // Position 7 – Fuel / Battery
+                fuelCode: providedLen >= 7 ? upperVIN[6] : null,
+                fuel: providedLen >= 7 ? (data.fuel[upperVIN[6]] || 'Unknown') : null,
+
+                // Position 8 – Motor
+                motorCode: providedLen >= 8 ? upperVIN[7] : null,
+                motorData: providedLen >= 8 ? (data.motor[upperVIN[7]] || 'Unknown') : null,
+
+                // Position 9 – Check digit
+                checkDigit: providedLen >= 9 ? upperVIN[8] : null,
+
+                // Position 10 – Year
+                yearCode: yearCode,
+                year: yearCode ? (data.year[yearCode] || 'Unknown') : null,
+
+                // Position 11 – Plant
+                plantCode: providedLen >= 11 ? upperVIN[10] : null,
+                plantData: providedLen >= 11 ? (data.plant[upperVIN[10]] || 'Unknown') : null,
+
+                // Positions 12-17 – Sequence
+                sequence: providedLen >= 12 ? upperVIN.substring(11) : null
+            };
+        }
+
+        function renderResult(decoded) {
+            if (!decoded) {
+                resultEl.style.display = 'none';
+                return;
+            }
+
+            resultEl.style.display = 'block';
+
+            // === Quick Summary Cards (handle partial) ===
+
+            // WMI (always present)
+            document.getElementById('wmiValue').textContent = decoded.wmi;
+            document.getElementById('wmiMeaning').textContent = decoded.wmiData.meaning;
+
+            // Year
+            const yearValueEl = document.getElementById('yearValue');
+            const yearNoteEl = document.getElementById('yearNote');
+            if (decoded.year) {
+                yearValueEl.textContent = decoded.year;
+                if (decoded.era === 'new') {
+                    yearNoteEl.innerHTML = `<strong>Position 10:</strong> ${decoded.yearCode} • Model year (2024+ Highland)`;
+                } else {
+                    const yearType = (decoded.plantCode === 'C') ? 'Calendar year' : 'Model year';
+                    yearNoteEl.innerHTML = `<strong>Position 10:</strong> ${decoded.yearCode} • ${yearType}`;
+                }
+            } else {
+                yearValueEl.textContent = '—';
+                yearNoteEl.innerHTML = '<span class="missing">Position 10 not provided (partial VIN)</span>';
+            }
+
+            // Plant
+            const plantValueEl = document.getElementById('plantValue');
+            const plantMeaningEl = document.getElementById('plantMeaning');
+            if (decoded.plantCode) {
+                plantValueEl.innerHTML = `${decoded.plantCode} <span style="font-size:15px;color:#888">(${decoded.plantData})</span>`;
+                plantMeaningEl.textContent = decoded.wmi === '5YJ' ? 'North America' : 'Gigafactory Shanghai';
+            } else {
+                plantValueEl.textContent = '—';
+                plantMeaningEl.innerHTML = '<span class="missing">Position 11 not provided (partial VIN)</span>';
+            }
+
+            // Motor
+            const motorValueEl = document.getElementById('motorValue');
+            const motorMeaningEl = document.getElementById('motorMeaning');
+            if (decoded.motorCode) {
+                motorValueEl.textContent = decoded.motorCode;
+                motorMeaningEl.textContent = decoded.motorData;
+            } else {
+                motorValueEl.textContent = '—';
+                motorMeaningEl.innerHTML = '<span class="missing">Position 8 not provided (partial VIN)</span>';
+            }
+
+            // === Era badge (only when year is known) ===
+            const eraBadge = document.getElementById('eraBadge');
+            if (decoded.yearCode) {
+                eraBadge.style.display = 'inline-flex';
+                eraBadge.innerHTML = decoded.era === 'new'
+                    ? `🚀 2024–2026 Highland refresh`
+                    : `📅 2017–2024`;
+                if (decoded.isPartial) eraBadge.classList.add('partial-badge');
+            } else {
+                eraBadge.style.display = 'none';
+            }
+
+            // === Full Breakdown Table (supports partial) ===
+            const tbody = document.getElementById('tableBody');
+            let tableHTML = '';
+
+            // Row 1-3: WMI
+            tableHTML += `
+                <tr>
+                    <td><span class="position">1-3</span></td>
+                    <td><strong>${decoded.wmi}</strong></td>
+                    <td><strong>${decoded.wmiData.meaning}</strong></td>
+                </tr>`;
+
+            // Row 4: Model 3
+            const modelCodeDisplay = decoded.modelCode !== null ? `<strong>${decoded.modelCode}</strong>` : '—';
+            const modelMeaning = decoded.modelCode !== null
+                ? (decoded.isModel3 ? '<strong>Model 3</strong>' : '<span style="color:#ff4444">Not Model 3</span>')
+                : '<span class="missing">Not provided</span>';
+            tableHTML += `
+                <tr>
+                    <td><span class="position">4</span></td>
+                    <td>${modelCodeDisplay}</td>
+                    <td>${modelMeaning}</td>
+                </tr>`;
+
+            // Row 5: Body
+            tableHTML += createRow(5, decoded.bodyCode, decoded.body, 'Body style');
+
+            // Row 6: Restraint
+            tableHTML += createRow(6, decoded.restraintCode, decoded.restraint, 'Restraint system');
+
+            // Row 7: Fuel
+            tableHTML += createRow(7, decoded.fuelCode, decoded.fuel, 'Battery / Fuel type');
+
+            // Row 8: Motor
+            tableHTML += createRow(8, decoded.motorCode, decoded.motorData, 'Motor / Drive unit');
+
+            // Row 9: Check digit
+            tableHTML += createRow(9, decoded.checkDigit, 'Check digit (validates VIN)', null);
+
+            // Row 10: Year
+            tableHTML += createRow(10, decoded.yearCode, decoded.year ? `<strong>${decoded.year}</strong>` : null, 'Model / Calendar year');
+
+            // Row 11: Plant
+            tableHTML += createRow(11, decoded.plantCode, decoded.plantData, 'Manufacturing plant');
+
+            // Row 12-17: Sequence
+            const seqDisplay = decoded.sequence !== null ? `<strong>${decoded.sequence}</strong>` : '—';
+            const seqMeaning = decoded.sequence !== null
+                ? 'Production sequence number'
+                : '<span class="missing">Not provided (partial VIN)</span>';
+            tableHTML += `
+                <tr>
+                    <td><span class="position">12-17</span></td>
+                    <td>${seqDisplay}</td>
+                    <td>${seqMeaning}</td>
+                </tr>`;
+
+            tbody.innerHTML = tableHTML;
+        }
+
+        // Helper to create table row for partial support
+        function createRow(pos, code, meaning, fallbackMeaning) {
+            const codeHTML = code !== null ? `<strong>${code}</strong>` : '—';
+            let meaningHTML = '';
+
+            if (meaning !== null) {
+                meaningHTML = meaning;
+            } else if (fallbackMeaning) {
+                meaningHTML = `<span class="missing">${fallbackMeaning} – not provided</span>`;
+            } else {
+                meaningHTML = '<span class="missing">Not provided (partial VIN)</span>';
+            }
+
+            return `
+                <tr>
+                    <td><span class="position">${pos}</span></td>
+                    <td>${codeHTML}</td>
+                    <td>${meaningHTML}</td>
+                </tr>`;
+        }
+
+        function updateDecoder() {
+            let vin = vinInput.value.trim();
+
+            // Auto-uppercase as user types
+            if (vin !== vin.toUpperCase()) {
+                vinInput.value = vin.toUpperCase();
+                vin = vinInput.value;
+            }
+
+            if (vin.length === 0) {
+                statusEl.innerHTML = '';
+                resultEl.style.display = 'none';
+                return;
+            }
+
+            if (vin.length < 3) {
+                statusEl.innerHTML = `<span class="warning">Type at least 3 characters to start decoding (WMI)</span>`;
+                resultEl.style.display = 'none';
+                return;
+            }
+
+            const decoded = decodeVIN(vin);
+
+            if (!decoded) {
+                statusEl.innerHTML = `<span class="error">Invalid WMI – must start with 5YJ or LRW</span>`;
+                resultEl.style.display = 'none';
+                return;
+            }
+
+            // Model 3 check (only if position 4 is provided)
+            if (decoded.modelCode !== null && !decoded.isModel3) {
+                statusEl.innerHTML = `<span class="warning">⚠️ WMI valid but position 4 ≠ 3 (may not be Model 3) • Partial decode still shown</span>`;
+            } else if (decoded.isPartial) {
+                statusEl.innerHTML = `<span class="success">✓ Partial VIN decoded (${decoded.providedLen}/17 characters)</span>`;
+            } else {
+                statusEl.innerHTML = `<span class="success">✓ Full Tesla Model 3 VIN decoded • ${decoded.era === 'new' ? '2024–2026 manual' : '2017–2024 manual'}</span>`;
+            }
+
+            renderResult(decoded);
+        }
+
+        // Real-time decoding
+        vinInput.addEventListener('input', updateDecoder);
+
+        // Initial check in case of pre-filled value
+        window.onload = () => {
+            if (vinInput.value.trim()) updateDecoder();
+        };
+    </script>
+</body>
+</html>
