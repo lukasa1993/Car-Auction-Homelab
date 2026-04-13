@@ -382,6 +382,21 @@ export class AuctionStore {
         UNIQUE(lot_id, sha256)
       );
 
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT PRIMARY KEY,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS lot_notification_log (
+        lot_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        notified_at TEXT NOT NULL,
+        PRIMARY KEY (lot_id, event_type)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_lots_source_target ON lots(source_key, target_key);
       CREATE INDEX IF NOT EXISTS idx_lots_workflow ON lots(workflow_state);
       CREATE INDEX IF NOT EXISTS idx_lot_images_lot_id ON lot_images(lot_id);
@@ -1161,5 +1176,48 @@ export class AuctionStore {
       missingMarked += 1;
     }
     return missingMarked;
+  }
+
+  savePushSubscription(endpoint: string, p256dh: string, auth: string): void {
+    this.db.query(`
+      INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth
+    `).run(randomUUID(), endpoint, p256dh, auth, new Date().toISOString());
+  }
+
+  removePushSubscription(endpoint: string): void {
+    this.db.query("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+  }
+
+  getPushSubscriptions(): Array<{ id: string; endpoint: string; p256dh: string; auth: string }> {
+    return this.db.query("SELECT id, endpoint, p256dh, auth FROM push_subscriptions").all() as Array<{
+      id: string;
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+    }>;
+  }
+
+  getLotsToNotify12h(): Array<{ id: string; lot_number: string; source_key: string; marker: string }> {
+    return this.db.query(`
+      SELECT id, lot_number, source_key, marker
+      FROM lots
+      WHERE status = 'upcoming'
+        AND workflow_state != 'removed'
+        AND auction_date LIKE '%T%'
+        AND datetime(auction_date) > datetime('now')
+        AND datetime(auction_date) <= datetime('now', '+12 hours')
+        AND id NOT IN (
+          SELECT lot_id FROM lot_notification_log WHERE event_type = 'threshold_12h'
+        )
+    `).all() as Array<{ id: string; lot_number: string; source_key: string; marker: string }>;
+  }
+
+  recordLotNotification(lotId: string, eventType: string): void {
+    this.db.query(`
+      INSERT OR IGNORE INTO lot_notification_log (lot_id, event_type, notified_at)
+      VALUES (?, ?, ?)
+    `).run(lotId, eventType, new Date().toISOString());
   }
 }

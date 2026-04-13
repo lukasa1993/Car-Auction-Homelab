@@ -79,5 +79,6 @@ export function handlePublicPages(
       },
     },
     request,
+    authState.admin,
   );
 }

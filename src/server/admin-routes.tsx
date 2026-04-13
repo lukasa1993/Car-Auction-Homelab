@@ -47,6 +47,7 @@ export async function handleAdminPages(
         },
       },
       request,
+      true,
     );
   }
 
@@ -68,6 +69,7 @@ export async function handleAdminPages(
         },
       },
       request,
+      true,
     );
   }
 

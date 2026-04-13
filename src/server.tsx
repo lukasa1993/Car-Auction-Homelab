@@ -1,5 +1,6 @@
 import { ensureBetterAuthSchema } from "./lib/auth";
 import { LiveEventBus } from "./lib/live-events";
+import { PushService } from "./lib/push-service";
 import { AuctionStore } from "./models/auction-store";
 import { ensureAppClient, ensureAppCss, ensureCollectorBuild } from "./server/assets";
 import { loadServerConfig } from "./server/config";
@@ -13,13 +14,18 @@ async function bootstrap() {
   ensureCollectorBuild(config);
   await ensureBetterAuthSchema();
 
+  const store = new AuctionStore({
+    databasePath: config.databasePath,
+    mediaDir: config.mediaDir,
+  });
+  const push = new PushService(config.vapidPublicKey, config.vapidPrivateKey, config.vapidSubject, store);
+  push.startScheduler();
+
   const services = {
     config,
-    store: new AuctionStore({
-      databasePath: config.databasePath,
-      mediaDir: config.mediaDir,
-    }),
+    store,
     liveEvents: new LiveEventBus(),
+    push,
   };
 
   const server = Bun.serve({

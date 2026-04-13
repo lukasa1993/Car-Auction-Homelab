@@ -22,6 +22,9 @@ export interface ServerConfig {
   collectorPrivateKeyPath: string;
   collectorVersion: string;
   minimumSupportedCollectorVersion: string;
+  vapidPublicKey: string;
+  vapidPrivateKey: string;
+  vapidSubject: string;
 }
 
 export function loadServerConfig(): ServerConfig {
@@ -64,6 +67,10 @@ export function loadServerConfig(): ServerConfig {
   const minimumSupportedCollectorVersion =
     process.env.AUCTION_MINIMUM_RUNNER_VERSION || collectorVersion;
 
+  const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || "";
+  const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || "";
+  const vapidSubject = process.env.VAPID_SUBJECT || "";
+
   return {
     rootDir,
     dataDir,
@@ -85,5 +92,8 @@ export function loadServerConfig(): ServerConfig {
     collectorPrivateKeyPath,
     collectorVersion,
     minimumSupportedCollectorVersion,
+    vapidPublicKey,
+    vapidPrivateKey,
+    vapidSubject,
   };
 }

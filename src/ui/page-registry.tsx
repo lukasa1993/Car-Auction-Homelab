@@ -10,6 +10,7 @@ import type { DateRenderConfig } from "../lib/date-render";
 
 type AppPageBase = {
   dateRender: DateRenderConfig;
+  isAdmin?: boolean;
 };
 
 export type AppPage =

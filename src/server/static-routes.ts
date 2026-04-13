@@ -20,7 +20,13 @@ export function handleStaticRequest(pathname: string, services: ServerServices):
               path: `${services.config.publicDir}/vin.html`,
               contentType: "text/html; charset=utf-8",
             }
-          : null;
+          : pathname === "/sw.js"
+            ? {
+                path: `${services.config.publicDir}/sw.js`,
+                contentType: "text/javascript; charset=utf-8",
+                extraHeaders: { "service-worker-allowed": "/" },
+              }
+            : null;
 
   if (!staticFile) {
     return null;
@@ -34,6 +40,7 @@ export function handleStaticRequest(pathname: string, services: ServerServices):
     headers: {
       "content-type": staticFile.contentType,
       "cache-control": "no-store",
+      ...("extraHeaders" in staticFile ? staticFile.extraHeaders : {}),
     },
   });
 }

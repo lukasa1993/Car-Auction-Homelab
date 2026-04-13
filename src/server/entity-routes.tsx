@@ -44,6 +44,7 @@ export async function handleEntityPages(
         },
       },
       request,
+      authState.admin,
     );
   }
 

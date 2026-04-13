@@ -26,6 +26,7 @@ COPY --from=builder /src/dist/auction /app/auction
 COPY --from=builder /src/public/app.css /app/public/app.css
 COPY --from=builder /src/public/app.js /app/public/app.js
 COPY --from=builder /src/public/vin.html /app/public/vin.html
+COPY --from=builder /src/public/sw.js /app/public/sw.js
 COPY --from=builder /src/collector/dist /app/collector/dist
 
 ENV NODE_ENV=production

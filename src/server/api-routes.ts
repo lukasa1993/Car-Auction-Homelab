@@ -127,5 +127,33 @@ export async function handleApiRoutes(
     return Response.json(services.store.getPublicLotList());
   }
 
+  if (pathname === "/api/push/vapid-key" && request.method === "GET") {
+    return Response.json({ publicKey: services.push.getVapidPublicKey() });
+  }
+
+  if (pathname === "/api/push/subscribe" && request.method === "POST") {
+    if (!authState.admin) {
+      return unauthorizedResponse();
+    }
+    const body = await request.json() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+    if (!body?.endpoint || !body?.keys?.p256dh || !body?.keys?.auth) {
+      return badRequestResponse("Missing push subscription fields");
+    }
+    services.store.savePushSubscription(body.endpoint, body.keys.p256dh, body.keys.auth);
+    return Response.json({ ok: true });
+  }
+
+  if (pathname === "/api/push/subscribe" && request.method === "DELETE") {
+    if (!authState.admin) {
+      return unauthorizedResponse();
+    }
+    const body = await request.json() as { endpoint?: string };
+    if (!body?.endpoint) {
+      return badRequestResponse("Missing endpoint");
+    }
+    services.store.removePushSubscription(body.endpoint);
+    return Response.json({ ok: true });
+  }
+
   return null;
 }

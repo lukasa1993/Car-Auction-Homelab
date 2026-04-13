@@ -29,16 +29,22 @@ export function redirect(location: string, status = 302): Response {
   });
 }
 
-export function renderPage(title: string, page: Omit<AppPage, "dateRender">, request: Request): Response {
+export function renderPage(
+  title: string,
+  page: Omit<AppPage, "dateRender">,
+  request: Request,
+  isAdmin = false,
+): Response {
   const fullPage = {
     ...page,
+    isAdmin,
     dateRender: buildDateRenderConfig(request),
   } as AppPage;
   const initialThemePreference = getThemePreferenceFromRequest(request);
 
   return new Response(`<!doctype html>${renderToString(
     <AppDocument page={fullPage} title={title} initialThemePreference={initialThemePreference}>
-      <AppShell>{renderAppPage(fullPage)}</AppShell>
+      <AppShell isAdmin={isAdmin}>{renderAppPage(fullPage)}</AppShell>
     </AppDocument>,
   )}`, {
     headers: {

@@ -6,6 +6,60 @@ type LiveToast = {
   message: string;
 };
 
+function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0))).buffer as ArrayBuffer;
+}
+
+function usePushNotifications() {
+  const [permission, setPermission] = React.useState<NotificationPermission | null>(null);
+  const [subscribed, setSubscribed] = React.useState(false);
+  const [vapidKey, setVapidKey] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    setPermission(Notification.permission);
+
+    fetch("/api/push/vapid-key")
+      .then((r) => r.json())
+      .then((data: { publicKey: string }) => {
+        if (data.publicKey) setVapidKey(data.publicKey);
+      })
+      .catch(() => {});
+  }, []);
+
+  const subscribe = React.useCallback(async () => {
+    if (!vapidKey || !("serviceWorker" in navigator)) return;
+
+    const perm = await Notification.requestPermission();
+    setPermission(perm);
+    if (perm !== "granted") return;
+
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
+    });
+
+    await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(sub.toJSON()),
+    });
+
+    setSubscribed(true);
+  }, [vapidKey]);
+
+  const supported =
+    typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && Boolean(vapidKey);
+
+  return { permission, subscribed, supported, subscribe };
+}
+
 function ToastCard({
   toast,
   onExpire,
@@ -31,10 +85,12 @@ function ToastCard({
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, isAdmin }: { children: React.ReactNode; isAdmin?: boolean }) {
   const [bannerMessage, setBannerMessage] = React.useState<string | null>(null);
   const [toasts, setToasts] = React.useState<LiveToast[]>([]);
   const nextToastId = React.useRef(1);
+  const { permission, subscribed, supported, subscribe } = usePushNotifications();
+  const showNotifyButton = isAdmin && supported && !subscribed && permission !== "granted";
 
   const expireToast = React.useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -76,6 +132,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      {showNotifyButton ? (
+        <div className="pointer-events-none fixed right-4 top-4 z-50">
+          <button
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-xl transition-colors hover:bg-accent"
+            onClick={() => void subscribe()}
+            type="button"
+          >
+            Enable notifications
+          </button>
+        </div>
+      ) : null}
       <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
         {bannerMessage ? (
           <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-border/80 bg-card/95 px-4 py-3 text-sm text-card-foreground shadow-[0_18px_60px_-28px_rgba(18,18,18,0.42)] backdrop-blur-xl">

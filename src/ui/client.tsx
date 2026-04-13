@@ -9,5 +9,5 @@ const pageDataElement = document.getElementById("app-page-data");
 
 if (rootElement && pageDataElement?.textContent) {
   const page = JSON.parse(pageDataElement.textContent) as AppPage;
-  hydrateRoot(rootElement, <AppShell>{renderAppPage(page)}</AppShell>);
+  hydrateRoot(rootElement, <AppShell isAdmin={page.isAdmin}>{renderAppPage(page)}</AppShell>);
 }
