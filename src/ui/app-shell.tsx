@@ -1,4 +1,5 @@
 import * as React from "react";
+import { RefreshCw } from "lucide-react";
 
 type LiveToast = {
   id: number;
@@ -11,6 +12,66 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = atob(base64);
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0))).buffer as ArrayBuffer;
+}
+
+const PTR_THRESHOLD = 72;
+
+function usePullToRefresh() {
+  const [pullY, setPullY] = React.useState(0);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [isTouching, setIsTouching] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const isStandalone =
+      ("standalone" in navigator && (navigator as { standalone?: boolean }).standalone === true) ||
+      window.matchMedia("(display-mode: standalone)").matches;
+
+    if (!isStandalone) return;
+
+    let startY = 0;
+    let atTop = false;
+
+    const onTouchStart = (e: TouchEvent) => {
+      startY = e.touches[0].clientY;
+      atTop = window.scrollY === 0;
+      setIsTouching(true);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!atTop) return;
+      const delta = e.touches[0].clientY - startY;
+      if (delta <= 0) return;
+      const clamped = Math.min(delta * 0.45, PTR_THRESHOLD);
+      setPullY(clamped);
+      if (clamped > 0) e.preventDefault();
+    };
+
+    const onTouchEnd = () => {
+      setIsTouching(false);
+      setPullY((current) => {
+        if (current >= PTR_THRESHOLD) {
+          setIsRefreshing(true);
+          setTimeout(() => window.location.reload(), 300);
+          return current;
+        }
+        return 0;
+      });
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, []);
+
+  return { pullY, isRefreshing, isTouching };
 }
 
 function usePushNotifications() {
@@ -95,6 +156,7 @@ export function AppShell({ children, isAdmin }: { children: React.ReactNode; isA
   const nextToastId = React.useRef(1);
   const { permission, subscribed, supported, subscribe } = usePushNotifications();
   const showNotifyButton = isAdmin && supported && !subscribed && permission !== "granted";
+  const { pullY, isRefreshing, isTouching } = usePullToRefresh();
 
   const expireToast = React.useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -134,8 +196,54 @@ export function AppShell({ children, isAdmin }: { children: React.ReactNode; isA
     };
   }, []);
 
+  const ptrProgress = Math.min(pullY / PTR_THRESHOLD, 1);
+  const ptrVisible = pullY > 0 || isRefreshing;
+
   return (
     <>
+      {ptrVisible ? (
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            display: "flex",
+            justifyContent: "center",
+            transform: `translateY(${isRefreshing ? 16 : pullY - 8}px)`,
+            transition: isTouching ? "none" : "transform 0.25s ease, opacity 0.25s ease",
+            opacity: isRefreshing ? 1 : ptrProgress,
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              boxShadow: "0 4px 16px -4px rgba(18,18,18,0.18)",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <RefreshCw
+              size={16}
+              style={{
+                color: "var(--muted-foreground)",
+                transform: isRefreshing ? undefined : `rotate(${ptrProgress * 360}deg)`,
+                animation: isRefreshing ? "ptr-spin 0.7s linear infinite" : undefined,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+      <style>{`@keyframes ptr-spin { to { transform: rotate(360deg); } }`}</style>
       {showNotifyButton ? (
         <div className="pointer-events-none fixed bottom-4 right-4 z-50 sm:bottom-auto sm:top-4">
           <button
