@@ -58,7 +58,7 @@ export function UserMenu({ email, logoutAction = "/admin/logout" }: UserMenuProp
       </button>
       {open ? (
         <div
-          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[240px] overflow-hidden rounded-2xl border border-border bg-popover shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)]"
+          className="absolute left-0 top-[calc(100%+6px)] z-50 w-[240px] overflow-hidden rounded-2xl border border-border bg-popover shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:left-auto sm:right-0"
           role="menu"
         >
           <div className="border-b border-border/70 px-3 py-3">

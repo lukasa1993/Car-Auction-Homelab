@@ -133,7 +133,7 @@ export function AppShell({ children, isAdmin }: { children: React.ReactNode; isA
   return (
     <>
       {showNotifyButton ? (
-        <div className="pointer-events-none fixed right-4 top-4 z-50">
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50 sm:bottom-auto sm:top-4">
           <button
             className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-xl transition-colors hover:bg-accent"
             onClick={() => void subscribe()}
