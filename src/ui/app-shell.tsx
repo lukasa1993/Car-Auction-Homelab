@@ -31,7 +31,12 @@ function usePushNotifications() {
   }, []);
 
   const subscribe = React.useCallback(async () => {
-    if (!vapidKey || !("serviceWorker" in navigator)) return;
+    if (!vapidKey) return;
+
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      alert("To enable push notifications, add this app to your Home Screen first.");
+      return;
+    }
 
     const perm = await Notification.requestPermission();
     setPermission(perm);
@@ -55,7 +60,7 @@ function usePushNotifications() {
   }, [vapidKey]);
 
   const supported =
-    typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && Boolean(vapidKey);
+    typeof window !== "undefined" && "Notification" in window && Boolean(vapidKey);
 
   return { permission, subscribed, supported, subscribe };
 }
