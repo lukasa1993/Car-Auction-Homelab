@@ -19,8 +19,8 @@ function usePushNotifications() {
   const [vapidKey, setVapidKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (typeof window === "undefined" || !("Notification" in window)) return;
-    setPermission(Notification.permission);
+    if (typeof window === "undefined") return;
+    if ("Notification" in window) setPermission(Notification.permission);
 
     fetch("/api/push/vapid-key")
       .then((r) => r.json())
@@ -59,8 +59,7 @@ function usePushNotifications() {
     setSubscribed(true);
   }, [vapidKey]);
 
-  const supported =
-    typeof window !== "undefined" && "Notification" in window && Boolean(vapidKey);
+  const supported = typeof window !== "undefined" && Boolean(vapidKey);
 
   return { permission, subscribed, supported, subscribe };
 }
