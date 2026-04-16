@@ -1214,6 +1214,21 @@ export class AuctionStore {
     `).all() as Array<{ id: string; lot_number: string; source_key: string; marker: string }>;
   }
 
+  getLotsToNotify30m(): Array<{ id: string; lot_number: string; source_key: string; marker: string }> {
+    return this.db.query(`
+      SELECT id, lot_number, source_key, marker
+      FROM lots
+      WHERE status = 'upcoming'
+        AND workflow_state != 'removed'
+        AND auction_date LIKE '%T%'
+        AND datetime(auction_date) > datetime('now')
+        AND datetime(auction_date) <= datetime('now', '+30 minutes')
+        AND id NOT IN (
+          SELECT lot_id FROM lot_notification_log WHERE event_type = 'threshold_30m'
+        )
+    `).all() as Array<{ id: string; lot_number: string; source_key: string; marker: string }>;
+  }
+
   recordLotNotification(lotId: string, eventType: string): void {
     this.db.query(`
       INSERT OR IGNORE INTO lot_notification_log (lot_id, event_type, notified_at)

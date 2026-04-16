@@ -40,59 +40,61 @@ export class PushService {
   }
 
   async checkAndNotify(): Promise<void> {
-    const lots = this.store.getLotsToNotify12h();
-    if (lots.length === 0) return;
+    const lots12h = this.store.getLotsToNotify12h();
+    const lots30m = this.store.getLotsToNotify30m();
+    if (lots12h.length === 0 && lots30m.length === 0) return;
 
     const subs = this.store.getPushSubscriptions();
-    if (subs.length === 0) {
-      // Still mark as notified so we don't re-check forever when nobody is subscribed
-      for (const lot of lots) {
-        this.store.recordLotNotification(lot.id, "threshold_12h");
+
+    const sendBatch = async (
+      lots: Array<{ id: string; lot_number: string; source_key: string; marker: string }>,
+      eventType: string,
+      label: string,
+    ): Promise<void> => {
+      if (lots.length === 0) return;
+
+      if (subs.length === 0) {
+        // Still mark as notified so we don't re-check forever when nobody is subscribed
+        for (const lot of lots) this.store.recordLotNotification(lot.id, eventType);
+        return;
       }
-      return;
-    }
 
-    const payload =
-      lots.length === 1
-        ? JSON.stringify({
-            title: `Auction <12h: ${lots[0].marker}`,
-            body: `${lots[0].source_key.toUpperCase()} · lot ${lots[0].lot_number}`,
-            url: "/",
-          })
-        : JSON.stringify({
-            title: `${lots.length} lots entering <12h window`,
-            body: lots.map((l) => l.marker).join(", "),
-            url: "/",
-          });
+      const payload =
+        lots.length === 1
+          ? JSON.stringify({
+              title: `Auction ${label}: ${lots[0].marker}`,
+              body: `${lots[0].source_key.toUpperCase()} · lot ${lots[0].lot_number}`,
+              url: "/",
+            })
+          : JSON.stringify({
+              title: `${lots.length} lots entering ${label} window`,
+              body: lots.map((l) => l.marker).join(", "),
+              url: "/",
+            });
 
-    const sendPromises = subs.map((sub) =>
-      webpush
-        .sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload)
-        .catch((err: unknown) => {
-          const status = (err as { statusCode?: number }).statusCode;
-          if (status === 410 || status === 404) {
-            // Subscription expired or unregistered — clean it up
-            this.store.removePushSubscription(sub.endpoint);
-          } else {
-            console.error(
-              JSON.stringify({ message: "push send error", endpoint: sub.endpoint.slice(0, 40), status }),
-            );
-          }
-        }),
-    );
+      const sendPromises = subs.map((sub) =>
+        webpush
+          .sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload)
+          .catch((err: unknown) => {
+            const status = (err as { statusCode?: number }).statusCode;
+            if (status === 410 || status === 404) {
+              this.store.removePushSubscription(sub.endpoint);
+            } else {
+              console.error(
+                JSON.stringify({ message: "push send error", endpoint: sub.endpoint.slice(0, 40), status }),
+              );
+            }
+          }),
+      );
 
-    await Promise.allSettled(sendPromises);
+      await Promise.allSettled(sendPromises);
 
-    for (const lot of lots) {
-      this.store.recordLotNotification(lot.id, "threshold_12h");
-    }
+      for (const lot of lots) this.store.recordLotNotification(lot.id, eventType);
 
-    console.log(
-      JSON.stringify({
-        message: "push notifications sent",
-        lots: lots.length,
-        subscribers: subs.length,
-      }),
-    );
+      console.log(JSON.stringify({ message: "push notifications sent", label, lots: lots.length, subscribers: subs.length }));
+    };
+
+    await sendBatch(lots12h, "threshold_12h", "<12h");
+    await sendBatch(lots30m, "threshold_30m", "<30m");
   }
 }
