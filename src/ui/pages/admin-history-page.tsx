@@ -119,6 +119,25 @@ function RowActions({ lot }: { lot: LotListItem }) {
           </Button>
         </form>
       ) : null}
+      <form
+        action={`/admin/lots/${lot.id}/delete`}
+        method="post"
+        onSubmit={(event) => {
+          if (!window.confirm(`Permanently delete lot ${lot.lotNumber}? This removes the row and its images.`)) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <input name="redirect" type="hidden" value="/admin/history" />
+        <Button
+          className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+          size="sm"
+          type="submit"
+          variant="outline"
+        >
+          Delete
+        </Button>
+      </form>
     </div>
   );
 }

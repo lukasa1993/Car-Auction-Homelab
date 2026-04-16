@@ -253,83 +253,14 @@ function CopyLotButton({ lot }: { lot: LotListItem }) {
   );
 }
 
-function DeleteLotButton({
-  lot,
-  onDeleted,
-  redirectTo,
-}: {
-  lot: LotListItem;
-  onDeleted: (lotId: string) => void;
-  redirectTo: string;
-}) {
-  const [isPending, setIsPending] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-
-  const handleSubmit = React.useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isPending) {
-      return;
-    }
-    if (typeof window !== "undefined" && !window.confirm(`Permanently delete lot ${lot.lotNumber}? This removes the row and its images.`)) {
-      return;
-    }
-
-    const form = event.currentTarget;
-    setIsPending(true);
-    setError(null);
-
-    try {
-      const response = await fetch(form.action, {
-        method: form.method,
-        body: new FormData(form),
-        headers: {
-          "x-auction-request": "async",
-        },
-      });
-      if (!response.ok) {
-        throw new Error(`Delete failed with status ${response.status}`);
-      }
-      onDeleted(lot.id);
-    } catch {
-      setError("Failed");
-    } finally {
-      setIsPending(false);
-    }
-  }, [isPending, lot.id, lot.lotNumber, onDeleted]);
-
-  return (
-    <form
-      action={`/admin/lots/${lot.id}/delete`}
-      className="flex-1 sm:contents"
-      method="post"
-      onSubmit={handleSubmit}
-    >
-      <input name="redirect" type="hidden" value={redirectTo} />
-      <Button
-        aria-label={isPending ? "Deleting" : "Delete lot"}
-        className="h-10 w-full min-w-0 rounded-2xl px-3 text-destructive hover:bg-destructive hover:text-destructive-foreground sm:h-8 sm:w-auto sm:rounded-4xl sm:px-3"
-        disabled={isPending}
-        size="sm"
-        title={error ?? "Delete permanently"}
-        type="submit"
-        variant="outline"
-      >
-        {isPending ? "Deleting..." : "Delete"}
-      </Button>
-    </form>
-  );
-}
-
 function LotRowActions({
   lot,
   onRejected,
   redirectTo,
-  admin,
 }: {
   lot: LotListItem;
   onRejected: (lotId: string) => void;
   redirectTo: string;
-  admin: boolean;
 }) {
   return (
     <div className="flex w-full items-center justify-end gap-2">
@@ -349,7 +280,6 @@ function LotRowActions({
       </a>
       <CopyLotButton lot={lot} />
       <RejectListingButton lot={lot} onRejected={onRejected} redirectTo={redirectTo} />
-      {admin ? <DeleteLotButton lot={lot} onDeleted={onRejected} redirectTo={redirectTo} /> : null}
     </div>
   );
 }
@@ -434,7 +364,7 @@ export function MainPage({
                       <TableCell className="col-start-2 row-start-2 p-0 sm:p-3"><LotModelCell lot={lot} /></TableCell>
                       <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
                       <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
-                        <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} admin={auth.admin} />
+                        <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -503,7 +433,7 @@ export function MainPage({
                     <TableCell className="col-start-2 row-start-2 p-0 sm:p-3"><LotModelCell lot={lot} /></TableCell>
                     <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
                     <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
-                      <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} admin={auth.admin} />
+                      <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                     </TableCell>
                   </TableRow>
                 ))}
