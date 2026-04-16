@@ -212,6 +212,25 @@ export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
                     </Button>
                   </form>
                 )}
+                <form
+                  action={`/admin/lots/${lot.id}/delete`}
+                  method="post"
+                  onSubmit={(event) => {
+                    if (!window.confirm(`Permanently delete lot ${lot.lotNumber}? This removes the row and its images.`)) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  <input name="redirect" type="hidden" value="/" />
+                  <Button
+                    className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                    size="sm"
+                    type="submit"
+                    variant="outline"
+                  >
+                    Delete
+                  </Button>
+                </form>
               </>
             ) : null}
           </div>

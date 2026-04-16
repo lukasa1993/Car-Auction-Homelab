@@ -757,6 +757,27 @@ export class AuctionStore {
     `).run(randomUUID(), lotId, workflowState, actor, note, null, now);
   }
 
+  // Permanently removes a lot and all of its dependent rows + image files.
+  // lot_snapshots, lot_actions, lot_images cascade via FK; lot_notification_log
+  // has no FK, so clean it up manually.
+  hardDeleteLot(lotId: string): boolean {
+    const lotRow = this.db.query("SELECT id FROM lots WHERE id = ? LIMIT 1").get(lotId) as Record<string, unknown> | null;
+    if (!lotRow) {
+      return false;
+    }
+    const imageRows = this.db
+      .query("SELECT storage_path FROM lot_images WHERE lot_id = ?")
+      .all(lotId) as Array<{ storage_path: string | null }>;
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM lot_notification_log WHERE lot_id = ?").run(lotId);
+      this.db.query("DELETE FROM lots WHERE id = ?").run(lotId);
+    })();
+    for (const row of imageRows) {
+      this.removeStoredImageFile(row.storage_path);
+    }
+    return true;
+  }
+
   applyTargetMetadataUpdates(payload: TargetMetadataUpdatePayload): TargetMetadataUpdateSummary {
     const observedAt = payload.observedAt || new Date().toISOString();
     let applied = 0;

@@ -16,6 +16,12 @@ export function formatAuctionCountdown(auctionDate: string | null | undefined, n
 
   const diff = target - nowMs;
   if (diff <= 0) {
+    // A stored sale time that is hours in the past is almost always a stale
+    // row (placeholder date, lot moved to "Future / date TBD", etc.), not a
+    // lot that is genuinely still live. Don't pretend it's live forever.
+    if (diff < -2 * 60 * 60 * 1000) {
+      return null;
+    }
     return "Live now";
   }
 

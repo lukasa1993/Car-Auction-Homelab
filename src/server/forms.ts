@@ -21,14 +21,14 @@ export function parseTargetForm(form: FormData, defaults: Partial<VinTarget> = {
   };
 }
 
-export function parseLotActionPath(pathname: string): { lotId: string; action: "approve" | "remove" | "restore" } | null {
-  const match = pathname.match(/^\/admin\/lots\/([^/]+)\/(approve|remove|restore)$/);
+export function parseLotActionPath(pathname: string): { lotId: string; action: "approve" | "remove" | "restore" | "delete" } | null {
+  const match = pathname.match(/^\/admin\/lots\/([^/]+)\/(approve|remove|restore|delete)$/);
   if (!match) {
     return null;
   }
   return {
     lotId: decodeURIComponent(match[1]),
-    action: match[2] as "approve" | "remove" | "restore",
+    action: match[2] as "approve" | "remove" | "restore" | "delete",
   };
 }
 

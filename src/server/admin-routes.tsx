@@ -96,10 +96,20 @@ export async function handleAdminPages(
   const lotAction = parseLotActionPath(pathname);
   if (lotAction && request.method === "POST") {
     if (!authState.admin || !authState.email) {
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: "Admin access required" }, { status: 403 });
+      }
       return redirect("/admin/login?error=Admin%20access%20required", 303);
     }
     const form = await request.formData();
     const redirectTo = String(form.get("redirect") || "/");
+    if (lotAction.action === "delete") {
+      const deleted = services.store.hardDeleteLot(lotAction.lotId);
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: deleted, lotId: lotAction.lotId, deleted });
+      }
+      return redirect(redirectTo, 303);
+    }
     const actionMap = {
       approve: "approved",
       remove: "removed",
