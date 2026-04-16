@@ -663,7 +663,7 @@ function buildTargetMetadataObservationFromCandidate(
     : null;
 }
 
-function buildTargetMetadataObservationFromCopartItem(target: VinTarget, item: any): TargetMetadataObservation | null {
+function buildTargetMetadataObservationFromCopartItem(target: VinTarget, item: any, nowIso: string): TargetMetadataObservation | null {
   const text = normalizeWhitespace(
     [
       item.ld,
@@ -673,7 +673,7 @@ function buildTargetMetadataObservationFromCopartItem(target: VinTarget, item: a
       item.dd && `Primary damage: ${item.dd}`,
       item.sdd && `Secondary damage: ${item.sdd}`,
       item.dynamicLotDetails?.currentBid > 0 ? `Current bid: $${item.dynamicLotDetails.currentBid}` : "",
-      buildCopartApiAuctionRaw(item),
+      buildCopartApiAuctionRaw(item, nowIso),
       item.lcd,
       item.ess,
     ]
@@ -1486,10 +1486,47 @@ function collectCopartListImageCandidates(item: any): string[] {
   return [...promoted];
 }
 
-function buildCopartApiAuctionRaw(item: any): string {
-  if (item?.ad) {
+function isCopartFutureDateType(item: any): boolean {
+  const raw = item?.adt ?? item?.auctionDateType ?? item?.auction_date_type;
+  if (typeof raw !== "string") {
+    return false;
+  }
+  const normalized = raw.trim().toUpperCase();
+  return normalized === "F" || normalized === "FUTURE" || normalized === "FUTURESALE" || normalized === "FUTURE_SALE";
+}
+
+// Copart returns a placeholder value in `ad` for FUTURE (unscheduled) lots.
+// Treat the timestamp as a real sale time only when it looks plausible:
+// a numeric epoch-ms within roughly the live sale window, and not flagged
+// as a future/unscheduled date-type.
+function getCopartScheduledAuctionMillis(item: any, nowIso: string): number | null {
+  const ms = item?.ad;
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) {
+    return null;
+  }
+  if (isCopartFutureDateType(item)) {
+    return null;
+  }
+  const when = DateTime.fromMillis(ms);
+  if (!when.isValid) {
+    return null;
+  }
+  const now = DateTime.fromISO(nowIso);
+  if (now.isValid) {
+    const earliest = now.minus({ days: 2 });
+    const latest = now.plus({ years: 1 });
+    if (when < earliest || when > latest) {
+      return null;
+    }
+  }
+  return ms;
+}
+
+function buildCopartApiAuctionRaw(item: any, nowIso: string): string {
+  const ms = getCopartScheduledAuctionMillis(item, nowIso);
+  if (ms !== null) {
     const zone = getLuxonZone(item.tz);
-    const when = DateTime.fromMillis(item.ad, { zone });
+    const when = DateTime.fromMillis(ms, { zone });
     if (when.isValid) {
       return `${when.toFormat("ccc LLL dd, h:mma")} ${item.tz || ""}`.trim();
     }
@@ -1504,20 +1541,21 @@ function buildCopartApiAuctionRaw(item: any): string {
   return "upcoming lot";
 }
 
-function buildCopartApiAuctionDate(item: any): { value: string; raw: string } {
-  if (item?.ad) {
+function buildCopartApiAuctionDate(item: any, nowIso: string): { value: string; raw: string } {
+  const ms = getCopartScheduledAuctionMillis(item, nowIso);
+  if (ms !== null) {
     const zone = getLuxonZone(item.tz);
-    const when = DateTime.fromMillis(item.ad, { zone });
+    const when = DateTime.fromMillis(ms, { zone });
     if (when.isValid) {
       return {
         value: when.toISO({ suppressMilliseconds: true, includeOffset: true }) || "",
-        raw: buildCopartApiAuctionRaw(item),
+        raw: buildCopartApiAuctionRaw(item, nowIso),
       };
     }
   }
   return {
     value: "future",
-    raw: buildCopartApiAuctionRaw(item),
+    raw: buildCopartApiAuctionRaw(item, nowIso),
   };
 }
 
@@ -1532,7 +1570,7 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
       item.dd && `Primary damage: ${item.dd}`,
       item.sdd && `Secondary damage: ${item.sdd}`,
       item.dynamicLotDetails?.currentBid > 0 ? `Current bid: $${item.dynamicLotDetails.currentBid}` : "",
-      buildCopartApiAuctionRaw(item),
+      buildCopartApiAuctionRaw(item, nowIso),
       item.lcd,
       item.ess,
     ]
@@ -1552,7 +1590,7 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
     return null;
   }
   const status: ScrapedLotRecord["status"] = item?.dynamicLotDetails?.lotSold ? "done" : "upcoming";
-  const dateInfo = buildCopartApiAuctionDate(item);
+  const dateInfo = buildCopartApiAuctionDate(item, nowIso);
   const record: ScrapedLotRecord = {
     sourceKey: "copart",
     sourceLabel: "Copart",
@@ -1609,7 +1647,7 @@ async function fetchCopartMatches(
         continue;
       }
       seenLots.add(String(item.lotNumberStr || ""));
-      const observation = buildTargetMetadataObservationFromCopartItem(target, item);
+      const observation = buildTargetMetadataObservationFromCopartItem(target, item, nowIso);
       if (observation) {
         observations.push(observation);
       }
