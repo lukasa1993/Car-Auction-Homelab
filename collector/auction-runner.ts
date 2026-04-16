@@ -11,6 +11,24 @@ import {
   isGenericVinTargetMetadata,
   normalizeVinPattern,
 } from "../src/lib/vin-patterns";
+import {
+  buildScopeCoverageLog,
+  classifySaleTiming,
+  createSourceCoverageCounters,
+  incrementFilterReason,
+  isRepeatedPage,
+  MAX_SOURCE_PAGES,
+  planIaaiTraversal,
+  recordAcceptedLot,
+  recordRawPage,
+  recordUniqueLot,
+  shouldContinueCopartTraversal,
+  summarizeScopeCoverage,
+  type FilterReason,
+  type ScopeCoverageSummary,
+} from "./coverage";
+import { buildCopartSaleDateWindowFilter, getCopartScheduledAuctionMillis } from "./copart-search";
+import { appendIaaiSaleDateFacetSearches, normalizeIaaiSearchEntries } from "./iaai-search";
 
 type SourceKey = "copart" | "iaai";
 type RunnerScopeStatus = "complete" | "failed" | "partial";
@@ -81,6 +99,11 @@ interface ScrapedRecordWithImages {
   imageCandidates: string[];
 }
 
+interface FilteredResult<T> {
+  value: T | null;
+  filterReason: FilterReason | null;
+}
+
 interface LotImageSyncState {
   imageId: string;
   sourceUrl: string;
@@ -94,6 +117,11 @@ interface CoveredScope {
   targetKey: string;
   status: RunnerScopeStatus;
   notes?: string;
+}
+
+interface SourceSweepResult {
+  records: ScrapedRecordWithImages[];
+  coverage: ScopeCoverageSummary;
 }
 
 interface RunnerArgs {
@@ -502,40 +530,6 @@ function parseAuctionDate(text: string, now: Date): { raw: string; value: string
   return null;
 }
 
-function isUpcomingStatus(record: ScrapedLotRecord, nowIso: string): boolean {
-  if (record.status === "done") {
-    return false;
-  }
-  if (record.auctionDate === "future") {
-    return true;
-  }
-  if (record.auctionDate) {
-    if (record.auctionDate.includes("T")) {
-      const scheduled = DateTime.fromISO(record.auctionDate, { setZone: true });
-      const now = DateTime.fromISO(nowIso);
-      if (scheduled.isValid && now.isValid) {
-        return scheduled >= now;
-      }
-    }
-    return record.auctionDate >= nowIso.slice(0, 10);
-  }
-  return record.status === "upcoming";
-}
-
-function isWithinSaleWindow(record: ScrapedLotRecord, nowIso: string, saleWindowDays = 7): boolean {
-  if (!record.auctionDate || record.auctionDate === "future") {
-    return false;
-  }
-  const now = DateTime.fromISO(nowIso);
-  const windowEnd = now.plus({ days: saleWindowDays }).endOf("day");
-  if (record.auctionDate.includes("T")) {
-    const scheduled = DateTime.fromISO(record.auctionDate, { setZone: true });
-    return scheduled.isValid && scheduled >= now && scheduled <= windowEnd;
-  }
-  const scheduledDate = DateTime.fromISO(record.auctionDate).endOf("day");
-  return scheduledDate.isValid && scheduledDate >= now.startOf("day") && scheduledDate <= windowEnd;
-}
-
 function matchVehicleVinCode(vinOrPrefix = "", target: VinTarget): string | null {
   const normalized = normalizeVinPattern(vinOrPrefix);
   if (!normalized) {
@@ -802,17 +796,17 @@ function buildRecord(
   candidate: { text: string; url: string; title?: string | null; color?: string | null; sourceRaw?: unknown },
   nowIso: string,
   target: VinTarget,
-): ScrapedLotRecord | null {
+): FilteredResult<ScrapedLotRecord> {
   const text = normalizeWhitespace(candidate.text);
   if (!/\/lot\/\d+/i.test(candidate.url) && !/\/VehicleDetail\/\d+/i.test(candidate.url)) {
-    return null;
+    return { value: null, filterReason: "missing-lot-number" };
   }
   if (!matchesVehicleIdentity(text, candidate.url || "", target)) {
-    return null;
+    return { value: null, filterReason: "identity" };
   }
   const vin = extractMatchingVin(text, target);
   if (!vin) {
-    return null;
+    return { value: null, filterReason: "vin" };
   }
   const matchedCode = matchVehicleVinCode(vin, target) || normalizeVinPattern(target.vinPattern);
   const status = inferStatus(text);
@@ -821,7 +815,7 @@ function buildRecord(
   const auctionDateRaw = dateInfo ? dateInfo.raw : "";
   const modelYear = extractModelYear(text) ?? yearPage;
   if (modelYear != null && (modelYear < target.yearFrom || modelYear > target.yearTo)) {
-    return null;
+    return { value: null, filterReason: "year" };
   }
   const record: ScrapedLotRecord = {
     sourceKey,
@@ -846,12 +840,13 @@ function buildRecord(
     sourceRaw: candidate.sourceRaw,
   };
   if (!record.lotNumber) {
-    return null;
+    return { value: null, filterReason: "missing-lot-number" };
   }
-  if (!isUpcomingStatus(record, nowIso) || !isWithinSaleWindow(record, nowIso)) {
-    return null;
+  const timingFilterReason = classifySaleTiming(record, nowIso);
+  if (timingFilterReason) {
+    return { value: null, filterReason: timingFilterReason };
   }
-  return record;
+  return { value: record, filterReason: null };
 }
 
 async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -980,8 +975,8 @@ async function waitForIaaiBootstrap(page: Page, timeoutMs = 20000): Promise<Iaai
   return snapshot;
 }
 
-async function buildIaaiSearchRequestPayload(page: Page, pageNumber: number): Promise<Record<string, unknown>> {
-  return await page.evaluate((requestedPage) => {
+async function buildIaaiSearchRequestPayload(page: Page, pageNumber: number, nowIso: string): Promise<Record<string, unknown>> {
+  const pagePayload = await page.evaluate((requestedPage) => {
     const parseJson = (value: string | null | undefined) => {
       if (!value) {
         return null;
@@ -1006,11 +1001,10 @@ async function buildIaaiSearchRequestPayload(page: Page, pageNumber: number): Pr
     const searches = (gbpSearchQuery?.Searches || searchesScript || [])
       .map((entry) => ({
         Facets: entry?.Facets ?? null,
-        FullSearch: String(entry?.FullSearch || "").trim(),
+        FullSearch: entry?.FullSearch == null ? null : String(entry?.FullSearch || "").trim(),
         LongRanges: entry?.LongRanges ?? null,
         LongDiscretes: entry?.LongDiscretes ?? null,
-      }))
-      .filter((entry) => entry.FullSearch);
+      }));
     const pageSize = Number(document.querySelector<HTMLInputElement>("#PageSize")?.value || gbpSearchQuery?.PageSize || 100);
     const sort = Array.isArray(gbpSearchQuery?.Sort) && gbpSearchQuery.Sort.length > 0
       ? gbpSearchQuery.Sort
@@ -1033,10 +1027,16 @@ async function buildIaaiSearchRequestPayload(page: Page, pageNumber: number): Pr
       BidStatusFilters: [{ BidStatus: 6, IsSelected: true }],
     };
   }, pageNumber);
+  const normalizedSearches = normalizeIaaiSearchEntries((pagePayload.Searches as Array<Record<string, unknown>>) ?? []);
+
+  return {
+    ...pagePayload,
+    Searches: appendIaaiSaleDateFacetSearches(normalizedSearches, nowIso),
+  };
 }
 
-async function fetchIaaiSearchPageHtmlFromInternalApi(page: Page, pageNumber: number): Promise<string> {
-  const payload = await buildIaaiSearchRequestPayload(page, pageNumber);
+async function fetchIaaiSearchPageHtmlFromInternalApi(page: Page, pageNumber: number, nowIso: string): Promise<string> {
+  const payload = await buildIaaiSearchRequestPayload(page, pageNumber, nowIso);
   const response = await page.evaluate(async ({ body, timestamp }) => {
     const result = await fetch(`/Search?c=${timestamp}`, {
       method: "POST",
@@ -1220,11 +1220,10 @@ async function fetchIaaiDirectMatches(
   target: VinTarget,
   nowIso: string,
   observations: TargetMetadataObservation[],
-): Promise<{ records: ScrapedRecordWithImages[]; pagesFetched: number; candidatesScanned: number }> {
+): Promise<SourceSweepResult> {
   const records: ScrapedRecordWithImages[] = [];
   const seenUrls = new Set<string>();
-  let pagesFetched = 0;
-  let candidatesScanned = 0;
+  const coverageCounters = createSourceCoverageCounters();
   const searchUrl = buildIaaiSearchUrl(target);
   const fallbackYear = target.yearFrom === target.yearTo ? target.yearFrom : null;
   await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
@@ -1247,12 +1246,20 @@ async function fetchIaaiDirectMatches(
     throw new Error(`IAAI search request blocked for ${target.key}`);
   }
   if (bootstrap.noResults) {
-    return { records, pagesFetched, candidatesScanned };
+    const coverage = summarizeScopeCoverage(coverageCounters, "exhausted");
+    console.log(JSON.stringify(buildScopeCoverageLog({
+      sourceKey: "iaai",
+      targetKey: target.key,
+      counters: coverageCounters,
+      stopReason: coverage.stopReason,
+      status: coverage.status,
+    })));
+    return { records, coverage };
   }
 
   let snapshot: IaaiSearchSnapshot | null = null;
   try {
-    const firstPageHtml = await fetchIaaiSearchPageHtmlFromInternalApi(page, 1);
+    const firstPageHtml = await fetchIaaiSearchPageHtmlFromInternalApi(page, 1, nowIso);
     snapshot = await readIaaiSearchSnapshotFromHtml(page, firstPageHtml, 1);
   } catch {
     snapshot = null;
@@ -1275,16 +1282,36 @@ async function fetchIaaiDirectMatches(
     throw new Error(`IAAI search request blocked for ${target.key}`);
   }
   if (snapshot.noResults) {
-    return { records, pagesFetched, candidatesScanned };
+    const coverage = summarizeScopeCoverage(coverageCounters, "exhausted");
+    console.log(JSON.stringify(buildScopeCoverageLog({
+      sourceKey: "iaai",
+      targetKey: target.key,
+      counters: coverageCounters,
+      stopReason: coverage.stopReason,
+      status: coverage.status,
+    })));
+    return { records, coverage };
   }
   if (snapshot.candidates.length === 0) {
-    throw new Error(`IAAI search returned no parsable listings for ${target.key} (${snapshot.title}: ${snapshot.bodyPreview})`);
+    recordRawPage(coverageCounters, 0);
+    const coverage = summarizeScopeCoverage(coverageCounters, "unexpected-empty-page");
+    console.log(JSON.stringify(buildScopeCoverageLog({
+      sourceKey: "iaai",
+      targetKey: target.key,
+      counters: coverageCounters,
+      stopReason: coverage.stopReason,
+      status: coverage.status,
+    })));
+    return { records, coverage };
   }
 
-  const finalPage = Math.min(Math.max(snapshot.totalPages, 1), 10);
-  for (let pageNumber = 1; pageNumber <= finalPage; pageNumber += 1) {
+  let maxSeenTotalPages = Math.max(snapshot.totalPages, 1);
+  let pageNumber = 1;
+  let stopReason: ScopeCoverageSummary["stopReason"] = "exhausted";
+
+  while (true) {
     if (pageNumber > 1) {
-      const html = await fetchIaaiSearchPageHtmlFromInternalApi(page, pageNumber);
+      const html = await fetchIaaiSearchPageHtmlFromInternalApi(page, pageNumber, nowIso);
       snapshot = await readIaaiSearchSnapshotFromHtml(page, html, pageNumber);
       if (snapshot.failure === "access-denied") {
         throw new Error(`IAAI search access denied for ${target.key} page ${pageNumber}`);
@@ -1293,36 +1320,55 @@ async function fetchIaaiDirectMatches(
         throw new Error(`IAAI search request blocked for ${target.key} page ${pageNumber}`);
       }
       if (snapshot.noResults || snapshot.candidates.length === 0) {
+        recordRawPage(coverageCounters, 0);
+        stopReason = "unexpected-empty-page";
         break;
       }
     }
 
-    pagesFetched += 1;
+    maxSeenTotalPages = Math.max(maxSeenTotalPages, Math.max(snapshot.totalPages, pageNumber));
+    recordRawPage(coverageCounters, snapshot.candidates.length);
     const candidates = snapshot.candidates;
-    candidatesScanned += candidates.length;
-    let newOnPage = 0;
     for (const candidate of candidates) {
       if (seenUrls.has(candidate.url)) {
+        incrementFilterReason(coverageCounters, "duplicate");
         continue;
       }
       seenUrls.add(candidate.url);
-      newOnPage += 1;
+      recordUniqueLot(coverageCounters);
       const observation = buildTargetMetadataObservationFromCandidate(target, candidate);
       if (observation) {
         observations.push(observation);
       }
       const record = buildRecord("iaai", fallbackYear, candidate, nowIso, target);
-      if (!record) {
+      if (!record.value) {
+        if (record.filterReason) {
+          incrementFilterReason(coverageCounters, record.filterReason);
+        }
         continue;
       }
-      records.push({ record, imageCandidates: candidate.imageCandidates });
+      records.push({ record: record.value, imageCandidates: candidate.imageCandidates });
+      recordAcceptedLot(coverageCounters);
     }
-    if (pageNumber >= snapshot.totalPages || newOnPage === 0) {
+
+    const traversalPlan = planIaaiTraversal(maxSeenTotalPages, MAX_SOURCE_PAGES);
+    if (pageNumber >= traversalPlan.finalPage) {
+      stopReason = traversalPlan.stopReason;
       break;
     }
+
+    pageNumber += 1;
   }
 
-  return { records, pagesFetched, candidatesScanned };
+  const coverage = summarizeScopeCoverage(coverageCounters, stopReason);
+  console.log(JSON.stringify(buildScopeCoverageLog({
+    sourceKey: "iaai",
+    targetKey: target.key,
+    counters: coverageCounters,
+    stopReason: coverage.stopReason,
+    status: coverage.status,
+  })));
+  return { records, coverage };
 }
 
 async function launchAuctionContext(headless: boolean, profileKey: SourceKey): Promise<BrowserContext> {
@@ -1411,11 +1457,12 @@ async function waitForReadyOrCaptcha(page: Page, siteKey: SourceKey, timeoutMs =
   return lastState;
 }
 
-async function fetchCopartApiPage(page: Page, vinPrefix: string, pageIndex: number, pageSize: number): Promise<any> {
-  return await page.evaluate(async ({ vinPrefix, pageIndex, pageSize }) => {
+async function fetchCopartApiPage(page: Page, vinPrefix: string, pageIndex: number, pageSize: number, nowIso: string): Promise<any> {
+  const nativeDateFilter = buildCopartSaleDateWindowFilter(nowIso);
+  return await page.evaluate(async ({ vinPrefix, pageIndex, pageSize, nativeDateFilter }) => {
     const payload = {
       query: [vinPrefix],
-      filter: {},
+      filter: nativeDateFilter.filter,
       sort: ["salelight_priority asc", "member_damage_group_priority asc", "auction_date_type desc", "auction_date_utc asc"],
       page: pageIndex,
       size: pageSize,
@@ -1428,7 +1475,7 @@ async function fetchCopartApiPage(page: Page, vinPrefix: string, pageIndex: numb
       displayName: "",
       searchName: "",
       backUrl: "",
-      includeTagByField: {},
+      includeTagByField: nativeDateFilter.includeTagByField,
       rawParams: {},
     };
     const response = await fetch("/public/lots/search-results", {
@@ -1441,7 +1488,7 @@ async function fetchCopartApiPage(page: Page, vinPrefix: string, pageIndex: numb
       body: JSON.stringify(payload),
     });
     return await response.json();
-  }, { vinPrefix, pageIndex, pageSize });
+  }, { vinPrefix, pageIndex, pageSize, nativeDateFilter });
 }
 
 function collectImageUrlsFromValue(value: unknown, results: Set<string>, baseOrigin: string, keyHint = ""): void {
@@ -1486,42 +1533,6 @@ function collectCopartListImageCandidates(item: any): string[] {
   return [...promoted];
 }
 
-function isCopartFutureDateType(item: any): boolean {
-  const raw = item?.adt ?? item?.auctionDateType ?? item?.auction_date_type;
-  if (typeof raw !== "string") {
-    return false;
-  }
-  const normalized = raw.trim().toUpperCase();
-  return normalized === "F" || normalized === "FUTURE" || normalized === "FUTURESALE" || normalized === "FUTURE_SALE";
-}
-
-// Copart returns a placeholder value in `ad` for FUTURE (unscheduled) lots.
-// Treat the timestamp as a real sale time only when it looks plausible:
-// a numeric epoch-ms within roughly the live sale window, and not flagged
-// as a future/unscheduled date-type.
-function getCopartScheduledAuctionMillis(item: any, nowIso: string): number | null {
-  const ms = item?.ad;
-  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) {
-    return null;
-  }
-  if (isCopartFutureDateType(item)) {
-    return null;
-  }
-  const when = DateTime.fromMillis(ms);
-  if (!when.isValid) {
-    return null;
-  }
-  const now = DateTime.fromISO(nowIso);
-  if (now.isValid) {
-    const earliest = now.minus({ days: 2 });
-    const latest = now.plus({ years: 1 });
-    if (when < earliest || when > latest) {
-      return null;
-    }
-  }
-  return ms;
-}
-
 function buildCopartApiAuctionRaw(item: any, nowIso: string): string {
   const ms = getCopartScheduledAuctionMillis(item, nowIso);
   if (ms !== null) {
@@ -1559,7 +1570,7 @@ function buildCopartApiAuctionDate(item: any, nowIso: string): { value: string; 
   };
 }
 
-function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): ScrapedRecordWithImages | null {
+function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): FilteredResult<ScrapedRecordWithImages> {
   const vehicleTitle = normalizeVehicleTitle(String(item.ld || ""));
   const text = normalizeWhitespace(
     [
@@ -1579,15 +1590,15 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
   );
 
   if (!matchesVehicleIdentity(text, item.ldu || item.ld || "", target)) {
-    return null;
+    return { value: null, filterReason: "identity" };
   }
   const vin = normalizeVinPattern(String(item.fv || ""));
   const matchedCode = matchVehicleVinCode(vin, target);
   if (!matchedCode) {
-    return null;
+    return { value: null, filterReason: "vin" };
   }
   if (Number(item.lcy) < target.yearFrom || Number(item.lcy) > target.yearTo) {
-    return null;
+    return { value: null, filterReason: "year" };
   }
   const status: ScrapedLotRecord["status"] = item?.dynamicLotDetails?.lotSold ? "done" : "upcoming";
   const dateInfo = buildCopartApiAuctionDate(item, nowIso);
@@ -1616,11 +1627,15 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Scr
       item,
     },
   };
-  if (!record.lotNumber || !isUpcomingStatus(record, nowIso) || !isWithinSaleWindow(record, nowIso)) {
-    return null;
+  if (!record.lotNumber) {
+    return { value: null, filterReason: "missing-lot-number" };
+  }
+  const timingFilterReason = classifySaleTiming(record, nowIso);
+  if (timingFilterReason) {
+    return { value: null, filterReason: timingFilterReason };
   }
   const imageCandidates = prioritizeImageCandidates(collectCopartListImageCandidates(item), record.url);
-  return { record, imageCandidates: imageCandidates.slice(0, 8) };
+  return { value: { record, imageCandidates: imageCandidates.slice(0, 8) }, filterReason: null };
 }
 
 async function fetchCopartMatches(
@@ -1628,43 +1643,82 @@ async function fetchCopartMatches(
   target: VinTarget,
   nowIso: string,
   observations: TargetMetadataObservation[],
-): Promise<ScrapedRecordWithImages[]> {
+): Promise<SourceSweepResult> {
   const records: ScrapedRecordWithImages[] = [];
   const seenLots = new Set<string>();
-  const entryLimit = 8;
-  for (let pageIndex = 0; pageIndex < 8; pageIndex += 1) {
+  const seenPageSignatures = new Set<string>();
+  const coverageCounters = createSourceCoverageCounters();
+  let stopReason: ScopeCoverageSummary["stopReason"] = "exhausted";
+
+  for (let pageIndex = 0; ; pageIndex += 1) {
     if (pageIndex > 0) {
       await delayWithJitter(COPART_API_PAGE_DELAY_MS, COPART_DELAY_JITTER_MS);
     }
-    const response = await fetchCopartApiPage(page, target.vinPrefix, pageIndex, 100);
+    const response = await fetchCopartApiPage(page, target.vinPrefix, pageIndex, 100, nowIso);
     const content = response?.data?.results?.content || [];
-    if (!content.length) {
+    recordRawPage(coverageCounters, content.length);
+
+    const emptyPageDecision = shouldContinueCopartTraversal({
+      pageIndex,
+      rawListingCount: content.length,
+      acceptedOnPage: 0,
+      maxPages: MAX_SOURCE_PAGES,
+    });
+    if (emptyPageDecision.shouldStop && emptyPageDecision.stopReason === "exhausted") {
+      stopReason = "exhausted";
       break;
     }
+
+    if (isRepeatedPage(content.map((item: any) => String(item?.lotNumberStr || "")), seenPageSignatures)) {
+      stopReason = "repeated-page";
+      break;
+    }
+
     let acceptedOnPage = 0;
     for (const item of content) {
-      if (seenLots.has(String(item.lotNumberStr || ""))) {
-        continue;
+      const rawLotNumber = String(item?.lotNumberStr || "").trim();
+      if (rawLotNumber) {
+        if (seenLots.has(rawLotNumber)) {
+          incrementFilterReason(coverageCounters, "duplicate");
+          continue;
+        }
+        seenLots.add(rawLotNumber);
+        recordUniqueLot(coverageCounters);
       }
-      seenLots.add(String(item.lotNumberStr || ""));
       const observation = buildTargetMetadataObservationFromCopartItem(target, item, nowIso);
       if (observation) {
         observations.push(observation);
       }
       const record = buildCopartApiRecord(item, target, nowIso);
-      if (record) {
-        records.push(record);
+      if (record.value) {
+        records.push(record.value);
+        recordAcceptedLot(coverageCounters);
         acceptedOnPage += 1;
+      } else if (record.filterReason) {
+        incrementFilterReason(coverageCounters, record.filterReason);
       }
     }
-    if (acceptedOnPage === 0) {
-      break;
-    }
-    if (records.length >= entryLimit * 20) {
+
+    const postPageDecision = shouldContinueCopartTraversal({
+      pageIndex,
+      rawListingCount: content.length,
+      acceptedOnPage,
+      maxPages: MAX_SOURCE_PAGES,
+    });
+    if (postPageDecision.shouldStop) {
+      stopReason = postPageDecision.stopReason ?? "exhausted";
       break;
     }
   }
-  return records;
+  const coverage = summarizeScopeCoverage(coverageCounters, stopReason);
+  console.log(JSON.stringify(buildScopeCoverageLog({
+    sourceKey: "copart",
+    targetKey: target.key,
+    counters: coverageCounters,
+    stopReason: coverage.stopReason,
+    status: coverage.status,
+  })));
+  return { records, coverage };
 }
 
 function absolutizeUrl(rawUrl: string, baseUrl: string): string | null {
@@ -2535,10 +2589,10 @@ async function scrapeCopartTargets(
     }
     await delayWithJitter(COPART_READY_SETTLE_MS, COPART_DELAY_JITTER_MS);
     try {
-      const targetRecords = await fetchCopartMatches(page, target, nowIso, observations);
-      records.push(...targetRecords);
-      scope.status = "complete";
-      scope.notes = `${targetRecords.length} records${state.status === "ready" ? "" : ` (bootstrap ${state.status})`}`;
+      const result = await fetchCopartMatches(page, target, nowIso, observations);
+      records.push(...result.records);
+      scope.status = result.coverage.status;
+      scope.notes = `${result.coverage.notes}${state.status === "ready" ? "" : ` bootstrap=${state.status}`}`;
     } catch (error) {
       scope.status = state.status === "unknown" ? "partial" : "failed";
       scope.notes = normalizeWhitespace(error instanceof Error ? error.message : String(error));
@@ -2567,8 +2621,8 @@ async function scrapeIaaiTargets(
     try {
       const result = await fetchIaaiDirectMatches(page, target, nowIso, observations);
       records.push(...result.records);
-      scope.status = "complete";
-      scope.notes = `${result.records.length} records across ${result.pagesFetched} pages`;
+      scope.status = result.coverage.status;
+      scope.notes = result.coverage.notes;
     } catch (error) {
       scope.status = "failed";
       scope.notes = normalizeWhitespace(error instanceof Error ? error.message : String(error));

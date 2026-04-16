@@ -179,7 +179,33 @@ describe("AuctionStore ingest safeguards", () => {
     expect(detail?.lot.evidence).toBe("seed evidence");
   });
 
-  test("gives a zero-result complete scope one grace run before downgrading lots", () => {
+  test("does not reconcile missing lots for partial scopes", () => {
+    const store = createStore();
+    store.upsertVinTarget({
+      key: "test-target",
+      vinPattern: "5YJ3E1EA*",
+      label: "Model 3 test",
+      carType: "Tesla Model 3",
+      marker: "VIN · 5YJ3E1EA*",
+      yearFrom: 2021,
+      yearTo: 2021,
+    });
+
+    store.ingest(createPayload([createRecord()]));
+
+    store.ingest(createPayload([], {
+      runnerId: "collector-partial-1",
+      completedAt: "2026-04-05T12:01:00.000Z",
+      scopes: [{ sourceKey: "copart", targetKey: "test-target", status: "partial" }],
+    }));
+
+    const detail = store.getLotDetail("copart", "12345678");
+    expect(detail).not.toBeNull();
+    expect(detail?.lot.status).toBe("upcoming");
+    expect(detail?.lot.missingCount).toBe(0);
+  });
+
+  test("reconciles zero-result complete scopes after the grace run", () => {
     const store = createStore();
     store.upsertVinTarget({
       key: "test-target",
