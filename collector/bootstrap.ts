@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+type SourceKey = "copart" | "iaai";
+
 interface RunnerManifestFile {
   path: string;
   sha256: string;
@@ -47,6 +49,36 @@ function parseArgs(argv: string[]) {
       return true;
     }),
   };
+}
+
+function parseSelectedSites(argv: string[]): SourceKey[] {
+  const siteIndex = argv.indexOf("--site");
+  if (siteIndex === -1 || !argv[siteIndex + 1]) {
+    return ["copart", "iaai"];
+  }
+
+  const selectedSites = Array.from(
+    new Set(
+      argv[siteIndex + 1]
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter((value): value is SourceKey => value === "copart" || value === "iaai"),
+    ),
+  );
+
+  return selectedSites.length > 0 ? selectedSites : ["copart", "iaai"];
+}
+
+function stripSiteArg(argv: string[]): string[] {
+  const nextArgs: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === "--site") {
+      index += 1;
+      continue;
+    }
+    nextArgs.push(argv[index]);
+  }
+  return nextArgs;
 }
 
 function sha256Hex(bytes: Uint8Array): string {
@@ -109,6 +141,88 @@ function joinUpdateUrl(baseUrl: string, relativePath: string): string {
   return `${baseUrl}/${encodedPath}`;
 }
 
+function stripPatchMarkers(source: string): string {
+  return source.replace(/^\/\* bootstrap runtime patches:[^\n]* \*\/\n?/gm, "");
+}
+
+function replaceOneOf(source: string, searches: string[], replacement: string, label: string): string {
+  for (const search of searches) {
+    if (source.includes(search)) {
+      return source.replace(search, replacement);
+    }
+  }
+  throw new Error(`Collector runtime patch could not find expected snippet for ${label}.`);
+}
+
+function patchRunnerEntrypoint(versionDir: string, manifest: RunnerManifest): void {
+  const entrypointPath = path.join(versionDir, manifest.entrypoint);
+  const patchMarker = "/* bootstrap runtime patches: iaai-location-v2 target-blacklist-v1 */";
+  const rawSource = readFileSync(entrypointPath, "utf8");
+  if (rawSource.includes(patchMarker)) {
+    return;
+  }
+  let source = stripPatchMarkers(rawSource);
+
+  source = replaceOneOf(
+    source,
+    [
+      "const readTitleValue = (node: ParentNode, prefix: string) =>\n      normalize(node.querySelector<HTMLElement>(`[title^=\\\"${prefix}\\\"]`)?.textContent);",
+      "const readTitleValue = (node: ParentNode, prefix: string) => {\n      const element = node.querySelector<HTMLElement>(`[title^=\\\"${prefix}\\\"]`);\n      const value = element?.getAttribute(\\\"title\\\") || element?.textContent || \\\"\\\";\n      return normalize(value.replace(new RegExp(`^${prefix}\\\\s*`, \\\"i\\\"), \\\"\\\"));\n    };",
+    ],
+    "const readTitleValue = (node: ParentNode, prefix: string) => {\n      const element = node.querySelector<HTMLElement>(`[title^=\\\"${prefix}\\\"]`);\n      const value = element?.getAttribute(\\\"title\\\") || element?.textContent || \\\"\\\";\n      return normalize(value.replace(new RegExp(`^${prefix}\\\\s*`, \\\"i\\\"), \\\"\\\"));\n    };",
+    "iaai readTitleValue",
+  );
+
+  source = replaceOneOf(
+    source,
+    [
+      "const branch = normalize(block.querySelector<HTMLElement>('a[aria-label=\\\"Branch Name\\\"]')?.textContent);",
+      "const branchElement = block.querySelector<HTMLElement>('a[aria-label=\\\"Branch Name\\\"]');\n      const branch = normalize(branchElement?.getAttribute(\\\"title\\\") || branchElement?.textContent);",
+    ],
+    "const branchElement = block.querySelector<HTMLElement>('a[aria-label=\\\"Branch Name\\\"]');\n      const branch = normalize(branchElement?.getAttribute(\\\"title\\\") || branchElement?.textContent);",
+    "iaai branch extraction",
+  );
+
+  source = replaceOneOf(
+    source,
+    [
+      "const vehicleLocation = normalize(block.querySelector<HTMLElement>('.text-md[title^=\\\"Vehicle Location:\\\"]')?.textContent);",
+      "const vehicleLocationElement = block.querySelector<HTMLElement>('.text-md[title^=\\\"Vehicle Location:\\\"]');\n      const vehicleLocation = normalize(\n        (vehicleLocationElement?.getAttribute(\\\"title\\\") || vehicleLocationElement?.textContent || \\\"\\\")\n          .replace(/^Vehicle Location:\\\\s*/i, \\\"\\\"),\n      );",
+    ],
+    "const vehicleLocationElement = block.querySelector<HTMLElement>('.text-md[title^=\\\"Vehicle Location:\\\"]');\n      const vehicleLocation = normalize(\n        (vehicleLocationElement?.getAttribute(\\\"title\\\") || vehicleLocationElement?.textContent || \\\"\\\")\n          .replace(/^Vehicle Location:\\\\s*/i, \\\"\\\"),\n      );",
+    "iaai vehicle location extraction",
+  );
+
+  source = replaceOneOf(
+    source,
+    [
+      "function normalizeColorValue(value: string | null | undefined): string | null {\n  const normalized = normalizeWhitespace(value);\n  if (!normalized) {\n    return null;\n  }\n  return toTitleCase(normalized.replace(/[.,;:\\-–]+$/, \"\"));\n}",
+    ],
+    "function normalizeColorValue(value: string | null | undefined): string | null {\n  const normalized = normalizeWhitespace(value);\n  if (!normalized) {\n    return null;\n  }\n  return toTitleCase(normalized.replace(/[.,;:\\-–]+$/, \"\"));\n}\n\nfunction normalizeTargetFilterList(values: unknown): string[] {\n  if (!Array.isArray(values)) {\n    return [];\n  }\n  const result: string[] = [];\n  const seen = new Set<string>();\n  for (const value of values) {\n    const normalized = normalizeWhitespace(String(value || \"\"));\n    if (!normalized) {\n      continue;\n    }\n    const key = normalized.toLowerCase();\n    if (seen.has(key)) {\n      continue;\n    }\n    seen.add(key);\n    result.push(normalized);\n  }\n  return result;\n}\n\nfunction normalizeLocationForTargetFilter(value: string | null | undefined): string {\n  return normalizeWhitespace(String(value || \"\").toLowerCase().replace(/[^a-z0-9]+/g, \" \"));\n}\n\nfunction matchesTargetBlacklist(target: VinTarget, record: { color?: string | null; location?: string | null }): boolean {\n  const rejectColors = normalizeTargetFilterList((target as any).rejectColors);\n  if (rejectColors.length > 0) {\n    const normalizedColor = normalizeWhitespace(String(record.color || \"\")).toLowerCase();\n    if (normalizedColor && rejectColors.some((value) => value.toLowerCase() === normalizedColor)) {\n      return true;\n    }\n  }\n\n  const rejectLocations = normalizeTargetFilterList((target as any).rejectLocations);\n  if (rejectLocations.length === 0) {\n    return false;\n  }\n\n  const normalizedLocation = normalizeLocationForTargetFilter(record.location);\n  if (!normalizedLocation) {\n    return false;\n  }\n  const locationTokens = new Set(normalizedLocation.split(\" \"));\n  return rejectLocations.some((value) => {\n    const normalizedNeedle = normalizeLocationForTargetFilter(value);\n    if (!normalizedNeedle) {\n      return false;\n    }\n    return normalizedNeedle.includes(\" \")\n      ? normalizedLocation.includes(normalizedNeedle)\n      : locationTokens.has(normalizedNeedle);\n  });\n}",
+    "target blacklist helpers",
+  );
+
+  source = replaceOneOf(
+    source,
+    [
+      "  const record: ScrapedLotRecord = {\n    sourceKey,\n    sourceLabel: sourceKey === \"iaai\" ? \"IAAI\" : \"Copart\",\n    targetKey: target.key,\n    yearPage,\n    carType: target.carType,\n    marker: target.marker,\n    vinPattern: matchedCode,\n    modelYear,\n    vin,\n    lotNumber: extractLot(text, candidate.url),\n    sourceDetailId: sourceKey === \"iaai\" ? candidate.url.match(/\\/VehicleDetail\\/(\\d+)/i)?.[1] || null : null,\n    vehicleTitle: normalizeVehicleTitle(candidate.title || \"\"),\n    status,\n    auctionDate,\n    auctionDateRaw,\n    location: extractLocation(text),\n    url: candidate.url,\n    evidence: text,\n    color: candidate.color ?? extractColorValue(text),\n    sourceRaw: candidate.sourceRaw,\n  };\n  if (!record.lotNumber) {",
+    ],
+    "  const record: ScrapedLotRecord = {\n    sourceKey,\n    sourceLabel: sourceKey === \"iaai\" ? \"IAAI\" : \"Copart\",\n    targetKey: target.key,\n    yearPage,\n    carType: target.carType,\n    marker: target.marker,\n    vinPattern: matchedCode,\n    modelYear,\n    vin,\n    lotNumber: extractLot(text, candidate.url),\n    sourceDetailId: sourceKey === \"iaai\" ? candidate.url.match(/\\/VehicleDetail\\/(\\d+)/i)?.[1] || null : null,\n    vehicleTitle: normalizeVehicleTitle(candidate.title || \"\"),\n    status,\n    auctionDate,\n    auctionDateRaw,\n    location: extractLocation(text),\n    url: candidate.url,\n    evidence: text,\n    color: candidate.color ?? extractColorValue(text),\n    sourceRaw: candidate.sourceRaw,\n  };\n  if (matchesTargetBlacklist(target, record)) {\n    return { value: null, filterReason: \"identity\" };\n  }\n  if (!record.lotNumber) {",
+    "buildRecord target blacklist",
+  );
+
+  source = replaceOneOf(
+    source,
+    [
+      "  const record: ScrapedLotRecord = {\n    sourceKey: \"copart\",\n    sourceLabel: \"Copart\",\n    targetKey: target.key,\n    yearPage: Number(item.lcy) || null,\n    carType: target.carType,\n    marker: target.marker,\n    vinPattern: matchedCode,\n    modelYear: Number(item.lcy) || null,\n    vin,\n    lotNumber: String(item.lotNumberStr || \"\"),\n    sourceDetailId: null,\n    vehicleTitle,\n    status,\n    auctionDate: dateInfo.value,\n    auctionDateRaw: dateInfo.raw,\n    location: item.yn || item.syn || \"\",\n    url: `https://www.copart.com/lot/${item.lotNumberStr}/${item.ldu || \"\"}`.replace(/\\/$/, \"\"),\n    evidence: text,\n    color: normalizeColorValue(item.clr) || extractColorValue([item.lcd, item.ld, item.ess].filter(Boolean).join(\" \")),\n    sourceRaw: {\n      source: \"copart-search-api\",\n      item,\n    },\n  };\n  if (!record.lotNumber) {",
+    ],
+    "  const record: ScrapedLotRecord = {\n    sourceKey: \"copart\",\n    sourceLabel: \"Copart\",\n    targetKey: target.key,\n    yearPage: Number(item.lcy) || null,\n    carType: target.carType,\n    marker: target.marker,\n    vinPattern: matchedCode,\n    modelYear: Number(item.lcy) || null,\n    vin,\n    lotNumber: String(item.lotNumberStr || \"\"),\n    sourceDetailId: null,\n    vehicleTitle,\n    status,\n    auctionDate: dateInfo.value,\n    auctionDateRaw: dateInfo.raw,\n    location: item.yn || item.syn || \"\",\n    url: `https://www.copart.com/lot/${item.lotNumberStr}/${item.ldu || \"\"}`.replace(/\\/$/, \"\"),\n    evidence: text,\n    color: normalizeColorValue(item.clr) || extractColorValue([item.lcd, item.ld, item.ess].filter(Boolean).join(\" \")),\n    sourceRaw: {\n      source: \"copart-search-api\",\n      item,\n    },\n  };\n  if (matchesTargetBlacklist(target, record)) {\n    return { value: null, filterReason: \"identity\" };\n  }\n  if (!record.lotNumber) {",
+    "buildCopartApiRecord target blacklist",
+  );
+
+  writeFileSync(entrypointPath, `${patchMarker}\n${source}`);
+}
+
 async function ensureRunnerVersion(updateBaseUrl: string, runnerHome: string, manifest: RunnerManifest): Promise<string> {
   const versionDir = path.join(runnerHome, "versions", manifest.version);
   const manifestPath = path.join(versionDir, "manifest.json");
@@ -157,8 +271,45 @@ async function ensureRunnerVersion(updateBaseUrl: string, runnerHome: string, ma
     writeFileSync(browserMarker, new Date().toISOString());
   }
 
+  patchRunnerEntrypoint(versionDir, manifest);
   writeFileSync(path.join(runnerHome, "current-version.txt"), manifest.version);
   return versionDir;
+}
+
+function spawnCollectorProcess({
+  versionDir,
+  manifest,
+  baseUrl,
+  updateBaseUrl,
+  passthroughArgs,
+  siteKey,
+}: {
+  versionDir: string;
+  manifest: RunnerManifest;
+  baseUrl: string;
+  updateBaseUrl: string;
+  passthroughArgs: string[];
+  siteKey?: SourceKey;
+}) {
+  const childArgs = [
+    "bun",
+    "run",
+    manifest.entrypoint,
+    "--base-url",
+    baseUrl,
+    "--update-base-url",
+    updateBaseUrl,
+    ...passthroughArgs,
+    ...(siteKey ? ["--site", siteKey] : []),
+  ];
+
+  return Bun.spawn(childArgs, {
+    cwd: versionDir,
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+    env: process.env,
+  });
 }
 
 async function main(): Promise<void> {
@@ -172,18 +323,36 @@ async function main(): Promise<void> {
   verifyManifest(manifest, signature.trim(), publicKeyPem);
   const versionDir = await ensureRunnerVersion(args.updateBaseUrl, args.runnerHome, manifest);
 
-  const child = Bun.spawn(
-    ["bun", "run", manifest.entrypoint, "--base-url", args.baseUrl, "--update-base-url", args.updateBaseUrl, ...args.passthroughArgs],
-    {
-      cwd: versionDir,
-      stdout: "inherit",
-      stderr: "inherit",
-      stdin: "inherit",
-      env: process.env,
-    },
+  const selectedSites = parseSelectedSites(args.passthroughArgs);
+  const passthroughArgs = stripSiteArg(args.passthroughArgs);
+
+  if (selectedSites.length <= 1) {
+    const child = spawnCollectorProcess({
+      versionDir,
+      manifest,
+      baseUrl: args.baseUrl,
+      updateBaseUrl: args.updateBaseUrl,
+      passthroughArgs,
+      siteKey: selectedSites[0],
+    });
+    const exitCode = await child.exited;
+    process.exit(exitCode);
+  }
+
+  const children = selectedSites.map((siteKey) =>
+    spawnCollectorProcess({
+      versionDir,
+      manifest,
+      baseUrl: args.baseUrl,
+      updateBaseUrl: args.updateBaseUrl,
+      passthroughArgs,
+      siteKey,
+    }),
   );
-  const exitCode = await child.exited;
-  process.exit(exitCode);
+
+  const exitCodes = await Promise.all(children.map(async (child) => await child.exited));
+  const failedExitCode = exitCodes.find((code) => code !== 0);
+  process.exit(failedExitCode ?? 0);
 }
 
 await main().catch((error) => {

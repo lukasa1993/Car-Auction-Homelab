@@ -1,4 +1,5 @@
 import { dispatchAuthRequest, forwardSetCookieHeaders } from "../lib/auth";
+import { getPatchedVinTargets, upsertPatchedVinTarget } from "../models/target-blacklist-patch";
 import type { AuthState, ServerServices } from "./context";
 import { parseLotActionPath, parseTargetForm } from "./forms";
 import { authRedirectFromResponse, redirect, renderPage } from "./responses";
@@ -43,7 +44,7 @@ export async function handleAdminPages(
           email: authState.email,
           error: url.searchParams.get("error"),
           historyCount,
-          targets: services.store.getVinTargets(),
+          targets: getPatchedVinTargets(services.store),
         },
       },
       request,
@@ -125,7 +126,7 @@ export async function handleAdminPages(
     }
     const form = await request.formData();
     try {
-      services.store.upsertVinTarget(parseTargetForm(form));
+      upsertPatchedVinTarget(services.store, parseTargetForm(form));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save target";
       return redirect(`/admin?error=${encodeURIComponent(message)}`, 303);
@@ -156,7 +157,7 @@ export async function handleAdminPages(
     const payload = parseTargetForm(form, { id: decodeURIComponent(targetUpdateMatch[1]) });
     payload.id = decodeURIComponent(targetUpdateMatch[1]);
     try {
-      services.store.upsertVinTarget(payload);
+      upsertPatchedVinTarget(services.store, payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save target";
       return redirect(`/admin?error=${encodeURIComponent(message)}`, 303);

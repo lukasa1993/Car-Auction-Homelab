@@ -1,6 +1,7 @@
 import type { AuthState, ServerServices } from "./context";
 import type { IngestPayload, SourceKey, TargetMetadataUpdatePayload } from "../lib/types";
 import { parseBoolean } from "../lib/utils";
+import { getPatchedScrapeConfig } from "../models/target-blacklist-patch";
 import { badRequestResponse, unauthorizedResponse } from "./responses";
 import { requireBearer } from "../lib/auth";
 
@@ -19,7 +20,7 @@ export async function handleApiRoutes(
       baseUrl: services.config.baseUrl,
       collectorUpdateBaseUrl: services.config.collectorUpdateBaseUrl,
       collectorVersion: services.config.collectorVersion,
-      ...services.store.getScrapeConfig(),
+      ...getPatchedScrapeConfig(services.store),
     });
   }
 

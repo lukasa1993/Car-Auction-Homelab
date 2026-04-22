@@ -1,6 +1,21 @@
 import type { VinTarget } from "../lib/types";
 import { normalizeVinPattern } from "../lib/vin-patterns";
 
+function parseListField(rawValue: FormDataEntryValue | null, fallback: string[] = []): string[] {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) {
+    return fallback;
+  }
+  return Array.from(
+    new Set(
+      raw
+        .split(/\r?\n|,/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 export function parseTargetForm(form: FormData, defaults: Partial<VinTarget> = {}): Partial<VinTarget> & {
   vinPattern: string;
 } {
@@ -15,6 +30,8 @@ export function parseTargetForm(form: FormData, defaults: Partial<VinTarget> = {
     yearTo: form.has("yearTo") ? Number.parseInt(String(form.get("yearTo") || defaults.yearTo || "2027"), 10) : defaults.yearTo,
     copartSlug: String(form.get("copartSlug") || defaults.copartSlug || "").trim() || undefined,
     iaaiPath: String(form.get("iaaiPath") || defaults.iaaiPath || "").trim() || undefined,
+    rejectColors: parseListField(form.get("rejectColors"), defaults.rejectColors || []),
+    rejectLocations: parseListField(form.get("rejectLocations"), defaults.rejectLocations || []),
     enabledCopart: form.has("enabledCopart"),
     enabledIaai: form.has("enabledIaai"),
     active: form.has("active"),

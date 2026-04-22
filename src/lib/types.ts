@@ -16,6 +16,8 @@ export interface VinTarget {
   yearTo: number;
   copartSlug: string;
   iaaiPath: string;
+  rejectColors: string[];
+  rejectLocations: string[];
   enabledCopart: boolean;
   enabledIaai: boolean;
   active: boolean;

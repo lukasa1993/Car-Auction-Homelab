@@ -13,6 +13,10 @@ function formatYearWindow(target: VinTarget): string {
   return target.yearFrom === target.yearTo ? String(target.yearFrom) : `${target.yearFrom}-${target.yearTo}`;
 }
 
+function formatFilterList(values: string[]): string {
+  return values.join("\n");
+}
+
 function SourceFlag({
   checked,
   label,
@@ -27,6 +31,37 @@ function SourceFlag({
       <input className="size-4 rounded border-border" defaultChecked={checked} name={name} type="checkbox" />
       {label}
     </label>
+  );
+}
+
+function FilterTextarea({
+  defaultValue,
+  id,
+  label,
+  name,
+  placeholder,
+}: {
+  defaultValue: string;
+  id: string;
+  label: string;
+  name: string;
+  placeholder: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" htmlFor={id}>
+        {label}
+      </label>
+      <textarea
+        className="min-h-[104px] w-full rounded-[18px] border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+        defaultValue={defaultValue}
+        id={id}
+        name={name}
+        placeholder={placeholder}
+        spellCheck={false}
+      />
+      <p className="text-sm text-muted-foreground">One value per line or comma-separated.</p>
+    </div>
   );
 }
 
@@ -48,6 +83,8 @@ function TargetCard({ target }: { target: VinTarget }) {
             <Badge variant={target.active ? "success" : "muted"}>{target.active ? "Active" : "Paused"}</Badge>
             {target.enabledCopart ? <Badge variant="outline">Copart</Badge> : null}
             {target.enabledIaai ? <Badge variant="outline">IAAI</Badge> : null}
+            {target.rejectColors.length ? <Badge variant="outline">{target.rejectColors.length} color reject{target.rejectColors.length === 1 ? "" : "s"}</Badge> : null}
+            {target.rejectLocations.length ? <Badge variant="outline">{target.rejectLocations.length} location reject{target.rejectLocations.length === 1 ? "" : "s"}</Badge> : null}
           </div>
           <div>
             <h2 className="text-base font-semibold tracking-tight">
@@ -91,6 +128,23 @@ function TargetCard({ target }: { target: VinTarget }) {
           <SourceFlag checked={target.active} label="Target active" name="active" />
         </div>
       </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <FilterTextarea
+          defaultValue={formatFilterList(target.rejectColors)}
+          id={`reject-colors-${target.id}`}
+          label="Reject colors"
+          name="rejectColors"
+          placeholder={"white\nblue\ntwo tone"}
+        />
+        <FilterTextarea
+          defaultValue={formatFilterList(target.rejectLocations)}
+          id={`reject-locations-${target.id}`}
+          label="Reject locations"
+          name="rejectLocations"
+          placeholder={"california\nca\nwashington dc"}
+        />
+      </div>
     </form>
   );
 }
@@ -129,10 +183,10 @@ export function AdminPage({
           <CardContent>
             <form
               action="/admin/targets"
-              className="flex flex-col gap-3 sm:flex-row sm:items-end"
+              className="grid gap-4"
               method="post"
             >
-              <div className="flex-1 space-y-2">
+              <div className="space-y-2">
                 <label
                   className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground"
                   htmlFor="vinPattern"
@@ -150,12 +204,31 @@ export function AdminPage({
                   Use <code>*</code> for wildcard characters.
                 </p>
               </div>
-              <input name="enabledCopart" type="hidden" value="on" />
-              <input name="active" type="hidden" value="on" />
-              <Button className="sm:self-end" type="submit">
-                <Plus className="size-4" />
-                Add target
-              </Button>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <FilterTextarea
+                  defaultValue=""
+                  id="new-reject-colors"
+                  label="Reject colors"
+                  name="rejectColors"
+                  placeholder={"white\nblue\ntwo tone"}
+                />
+                <FilterTextarea
+                  defaultValue=""
+                  id="new-reject-locations"
+                  label="Reject locations"
+                  name="rejectLocations"
+                  placeholder={"california\nca\nwashington dc"}
+                />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <input name="enabledCopart" type="hidden" value="on" />
+                <input name="enabledIaai" type="hidden" value="on" />
+                <input name="active" type="hidden" value="on" />
+                <Button className="sm:self-end" type="submit">
+                  <Plus className="size-4" />
+                  Add target
+                </Button>
+              </div>
             </form>
           </CardContent>
         </Card>

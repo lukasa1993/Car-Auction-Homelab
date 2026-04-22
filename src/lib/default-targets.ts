@@ -25,6 +25,8 @@ function buildTarget(
     yearTo,
     copartSlug,
     iaaiPath,
+    rejectColors: [],
+    rejectLocations: [],
     enabledCopart: true,
     enabledIaai: true,
     active: true,
