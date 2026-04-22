@@ -95,6 +95,46 @@ function HistoryImageCell({ lot }: { lot: LotListItem }) {
   );
 }
 
+function SelectionCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  ariaLabel,
+  disabled,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = Boolean(indeterminate && !checked);
+    }
+  }, [checked, indeterminate]);
+
+  return (
+    <label
+      className={`inline-flex items-center justify-center ${
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      }`}
+    >
+      <input
+        aria-label={ariaLabel}
+        checked={checked}
+        className="size-4 rounded border border-border bg-background accent-foreground"
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        ref={inputRef}
+        type="checkbox"
+      />
+    </label>
+  );
+}
+
 function RowActions({ lot }: { lot: LotListItem }) {
   return (
     <div className="flex items-center justify-end gap-1.5">
@@ -145,6 +185,7 @@ function RowActions({ lot }: { lot: LotListItem }) {
 export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
   const [filter, setFilter] = React.useState<FilterKey>("all");
   const [query, setQuery] = React.useState("");
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const nowMs = useDateNowMs(60000);
 
   const sorted = React.useMemo(() => sortHistory(lots), [lots]);
@@ -179,6 +220,41 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
       return haystack.includes(q);
     });
   }, [sorted, filter, query]);
+
+  const filteredIds = React.useMemo(() => filtered.map((lot) => lot.id), [filtered]);
+
+  React.useEffect(() => {
+    const visibleIdSet = new Set(filteredIds);
+    setSelectedIds((current) => {
+      const next = current.filter((id) => visibleIdSet.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [filteredIds]);
+
+  const selectedIdSet = React.useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedCount = selectedIds.length;
+  const allVisibleSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIdSet.has(id));
+  const someVisibleSelected = filteredIds.some((id) => selectedIdSet.has(id));
+
+  const toggleRowSelection = React.useCallback((lotId: string, checked: boolean) => {
+    setSelectedIds((current) => {
+      if (checked) {
+        return current.includes(lotId) ? current : [...current, lotId];
+      }
+      return current.filter((id) => id !== lotId);
+    });
+  }, []);
+
+  const toggleAllVisible = React.useCallback(
+    (checked: boolean) => {
+      setSelectedIds(checked ? filteredIds : []);
+    },
+    [filteredIds],
+  );
+
+  const clearSelection = React.useCallback(() => {
+    setSelectedIds([]);
+  }, []);
 
   return (
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
@@ -228,10 +304,60 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
           </div>
         </div>
 
+        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground">
+            {selectedCount ? `${selectedCount} selected` : "Select rows to bulk delete"}
+          </div>
+          <form
+            action="/admin/history/delete"
+            className="flex flex-wrap items-center gap-2"
+            method="post"
+            onSubmit={(event) => {
+              if (!selectedCount) {
+                event.preventDefault();
+                return;
+              }
+              if (
+                !window.confirm(
+                  `Permanently delete ${selectedCount} selected ${selectedCount === 1 ? "lot" : "lots"}? This removes the rows and their images.`,
+                )
+              ) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <input name="redirect" type="hidden" value="/admin/history" />
+            {selectedIds.map((lotId) => (
+              <input key={lotId} name="lotId" type="hidden" value={lotId} />
+            ))}
+            <Button disabled={!selectedCount} size="sm" type="submit" variant="destructive">
+              Delete selected
+            </Button>
+            <Button
+              disabled={!selectedCount}
+              onClick={clearSelection}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Clear
+            </Button>
+          </form>
+        </div>
+
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">
+                  <SelectionCheckbox
+                    ariaLabel="Select all visible rows"
+                    checked={allVisibleSelected}
+                    disabled={!filteredIds.length}
+                    indeterminate={someVisibleSelected && !allVisibleSelected}
+                    onChange={toggleAllVisible}
+                  />
+                </TableHead>
                 <TableHead className="w-[80px]">Image</TableHead>
                 <TableHead>Listing</TableHead>
                 <TableHead className="hidden md:table-cell">Status</TableHead>
@@ -244,8 +370,16 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
               {filtered.length ? (
                 filtered.map((lot) => {
                   const ts = historyTimestamp(lot);
+                  const isSelected = selectedIdSet.has(lot.id);
                   return (
                     <TableRow key={lot.id}>
+                      <TableCell>
+                        <SelectionCheckbox
+                          ariaLabel={`Select lot ${lot.lotNumber}`}
+                          checked={isSelected}
+                          onChange={(checked) => toggleRowSelection(lot.id, checked)}
+                        />
+                      </TableCell>
                       <TableCell>
                         <HistoryImageCell lot={lot} />
                       </TableCell>
@@ -299,7 +433,9 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
                       <TableCell className="hidden md:table-cell">
                         {ts ? (
                           <div className="flex flex-col gap-0.5">
-                            <span className="text-xs text-foreground"><LocalizedDateText format="timestamp" iso={ts} /></span>
+                            <span className="text-xs text-foreground">
+                              <LocalizedDateText format="timestamp" iso={ts} />
+                            </span>
                             <span className="text-[11px] text-muted-foreground">
                               {relativeFromNow(ts, nowMs)}
                             </span>
@@ -316,7 +452,7 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
                 })
               ) : (
                 <TableRow>
-                  <TableCell className="py-12 text-center text-sm text-muted-foreground" colSpan={6}>
+                  <TableCell className="py-12 text-center text-sm text-muted-foreground" colSpan={7}>
                     {query || filter !== "all"
                       ? "No listings match your filter."
                       : "No moderated listings yet."}
