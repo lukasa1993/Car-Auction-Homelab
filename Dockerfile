@@ -1,18 +1,13 @@
-# syntax=docker/dockerfile:1.7
-
 FROM oven/bun:1 AS builder
 
 WORKDIR /src
 
 COPY package.json bun.lock tsconfig.json ./
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile
-
-COPY collector/package.json ./collector/package.json
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    cd collector && bun install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 COPY collector ./collector
+RUN cd collector && bun install --frozen-lockfile
+
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
@@ -25,10 +20,7 @@ FROM alpine:3.21
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates libstdc++ \
- && addgroup -S app \
- && adduser -S -G app app \
- && mkdir -p /app/data /app/public /app/collector
+RUN apk add --no-cache ca-certificates libstdc++
 
 COPY --from=builder /src/dist/auction /app/auction
 COPY --from=builder /src/public/app.css /app/public/app.css
@@ -36,10 +28,6 @@ COPY --from=builder /src/public/app.js /app/public/app.js
 COPY --from=builder /src/public/vin.html /app/public/vin.html
 COPY --from=builder /src/public/sw.js /app/public/sw.js
 COPY --from=builder /src/collector/dist /app/collector/dist
-
-RUN chown -R app:app /app
-
-USER app
 
 ENV NODE_ENV=production
 ENV AUCTION_ROOT_DIR=/app
