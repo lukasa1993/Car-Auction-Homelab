@@ -70,30 +70,30 @@ fi
 echo "targets:"
 for row in "${targets[@]}"; do
   obj="$(printf '%s' "$row" | base64 --decode)"
-  jq -r '[.id, .lotNumber, .modelYear, .color, .workflowState, .auctionDate, .location] | @tsv' <<<"$obj"
+  jq -r '[.lotNumber, .modelYear, .color, .workflowState, .auctionDate, .location] | @tsv' <<<"$obj"
 done | column -t -s $'\t'
 
 for row in "${targets[@]}"; do
   obj="$(printf '%s' "$row" | base64 --decode)"
 
-  id="$(jq -r '.id' <<<"$obj")"
-  lot="$(jq -r '.lotNumber' <<<"$obj")"
+  lot_number="$(jq -r '.lotNumber' <<<"$obj")"
+  api_id="$(jq -r '.id' <<<"$obj")"
   color="$(jq -r '.color' <<<"$obj")"
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] would reject lot=$lot id=$id color=$color"
+    echo "[dry-run] would reject lot=$lot_number api_id=$api_id color=$color"
     continue
   fi
 
   code="$(
     curl -sS -o /tmp/auc-reject-body.$$ -w '%{http_code}' \
       -X POST \
-      "$BASE_URL/lot/$id/reject"
+      "$BASE_URL/lot/$lot_number/reject"
   )"
 
   if [[ "$code" =~ ^2 ]]; then
-    echo "rejected lot=$lot id=$id color=$color status=$code"
+    echo "rejected lot=$lot_number color=$color status=$code"
   else
-    echo "FAILED lot=$lot id=$id color=$color status=$code body=$(tr '\n' ' ' < /tmp/auc-reject-body.$$ | head -c 300)" >&2
+    echo "FAILED lot=$lot_number api_id=$api_id color=$color status=$code body=$(tr '\n' ' ' < /tmp/auc-reject-body.$$ | head -c 300)" >&2
   fi
 done
