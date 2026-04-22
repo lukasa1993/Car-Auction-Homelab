@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { VinTarget } from "../lib/types";
+import type { LotListItem, VinTarget } from "../lib/types";
 import { normalizeWhitespace } from "../lib/utils";
 import {
   deriveVinPrefix,
@@ -42,6 +42,102 @@ function parseJsonStringList(value: unknown): string[] {
   } catch {
     return [];
   }
+}
+
+function normalizeColorForTargetFilter(value: string | null | undefined): string {
+  return normalizeWhitespace(String(value || "")).toLowerCase();
+}
+
+function normalizeLocationForTargetFilter(value: string | null | undefined): string {
+  return normalizeWhitespace(String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " "));
+}
+
+function expandLocationFilterAliases(value: string): string[] {
+  const normalized = normalizeLocationForTargetFilter(value);
+  if (!normalized) {
+    return [];
+  }
+
+  const aliases = new Set<string>([normalized]);
+  if (normalized === "ca" || normalized === "california") {
+    aliases.add("ca");
+    aliases.add("california");
+  }
+  if (normalized === "wa" || normalized === "washington") {
+    aliases.add("wa");
+    aliases.add("washington");
+  }
+  if (
+    normalized === "dc" ||
+    normalized === "d c" ||
+    normalized === "washington dc" ||
+    normalized === "washington d c" ||
+    normalized === "district of columbia"
+  ) {
+    aliases.add("dc");
+    aliases.add("d c");
+    aliases.add("washington dc");
+    aliases.add("washington d c");
+    aliases.add("district of columbia");
+  }
+
+  return [...aliases];
+}
+
+function matchesLocationFilter(location: string | null | undefined, filterValue: string): boolean {
+  const normalizedLocation = normalizeLocationForTargetFilter(location);
+  if (!normalizedLocation) {
+    return false;
+  }
+
+  const locationTokens = new Set(normalizedLocation.split(" ").filter(Boolean));
+  return expandLocationFilterAliases(filterValue).some((candidate) => {
+    if (!candidate) {
+      return false;
+    }
+    return candidate.includes(" ") ? normalizedLocation.includes(candidate) : locationTokens.has(candidate);
+  });
+}
+
+export function getTargetBlacklistMatch(
+  target: Pick<VinTarget, "rejectColors" | "rejectLocations">,
+  record: { color?: string | null; location?: string | null },
+): { matched: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+
+  const rejectColors = normalizeStringList(target.rejectColors || []);
+  const normalizedColor = normalizeColorForTargetFilter(record.color);
+  if (
+    normalizedColor &&
+    rejectColors.some((value) => normalizeColorForTargetFilter(value) === normalizedColor)
+  ) {
+    reasons.push("color");
+  }
+
+  const rejectLocations = normalizeStringList(target.rejectLocations || []);
+  if (rejectLocations.some((value) => matchesLocationFilter(record.location, value))) {
+    reasons.push("location");
+  }
+
+  return {
+    matched: reasons.length > 0,
+    reasons,
+  };
+}
+
+export function matchesTargetBlacklist(
+  target: Pick<VinTarget, "rejectColors" | "rejectLocations">,
+  record: { color?: string | null; location?: string | null },
+): boolean {
+  return getTargetBlacklistMatch(target, record).matched;
+}
+
+function formatBlacklistNote(lot: Pick<LotListItem, "color" | "location">, reasons: string[]): string {
+  const details = [
+    lot.color ? `color=${lot.color}` : "",
+    lot.location ? `location=${lot.location}` : "",
+  ].filter(Boolean);
+  return `Auto-rejected by target blacklist (${reasons.join("+")})${details.length ? `: ${details.join("; ")}` : ""}`;
 }
 
 function buildGenericTargetMetadata(vinPattern: string): Pick<VinTarget, "label" | "carType" | "marker"> {
@@ -227,6 +323,29 @@ export function upsertPatchedVinTarget(store: AuctionStore, input: Partial<VinTa
   );
 
   return next.id;
+}
+
+export function applyTargetBlacklistToExistingLots(store: AuctionStore): { updated: number } {
+  const activeTargets = new Map(getPatchedVinTargets(store, true).map((target) => [target.key, target]));
+  let updated = 0;
+
+  for (const lot of store.getLotList(true)) {
+    if (!lot.targetKey || lot.workflowState === "removed") {
+      continue;
+    }
+    const target = activeTargets.get(lot.targetKey);
+    if (!target) {
+      continue;
+    }
+    const match = getTargetBlacklistMatch(target, lot);
+    if (!match.matched) {
+      continue;
+    }
+    store.setWorkflowState(lot.id, "removed", "system", formatBlacklistNote(lot, match.reasons));
+    updated += 1;
+  }
+
+  return { updated };
 }
 
 export function applyTargetBlacklistPatch(store: AuctionStore): void {
