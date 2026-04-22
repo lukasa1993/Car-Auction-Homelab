@@ -185,7 +185,7 @@ export function upsertPatchedVinTarget(store: AuctionStore, input: Partial<VinTa
       id, key, label, car_type, marker, vin_pattern, vin_prefix,
       year_from, year_to, copart_slug, iaai_path, reject_colors_json, reject_locations_json,
       enabled_copart, enabled_iaai, active, sort_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       key = excluded.key,
       label = excluded.label,
