@@ -156,8 +156,14 @@ function replaceOneOf(source: string, searches: string[], replacement: string, l
 
 function patchRunnerEntrypoint(versionDir: string, manifest: RunnerManifest): void {
   const entrypointPath = path.join(versionDir, manifest.entrypoint);
-  const patchMarker = "/* bootstrap runtime patches: iaai-location-v2 target-blacklist-v1 */";
   const rawSource = readFileSync(entrypointPath, "utf8");
+  if (manifest.entrypoint.endsWith(".js")) {
+    console.warn(
+      `Skipping collector runtime patch for built entrypoint ${manifest.entrypoint}. Refresh collector/release instead of patching compiled output.`,
+    );
+    return;
+  }
+  const patchMarker = "/* bootstrap runtime patches: iaai-location-v2 target-blacklist-v1 */";
   if (rawSource.includes(patchMarker)) {
     return;
   }
