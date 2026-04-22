@@ -1,7 +1,7 @@
 import type { AuthState, ServerServices } from "./context";
 import type { IngestPayload, SourceKey, TargetMetadataUpdatePayload } from "../lib/types";
 import { parseBoolean } from "../lib/utils";
-import { getPatchedScrapeConfig } from "../models/target-blacklist-patch";
+import { applyTargetBlacklistToExistingLots, getPatchedScrapeConfig } from "../models/target-blacklist-patch";
 import { badRequestResponse, unauthorizedResponse } from "./responses";
 import { requireBearer } from "../lib/auth";
 
@@ -33,10 +33,11 @@ export async function handleApiRoutes(
       return badRequestResponse("Malformed ingest payload");
     }
     const result = services.store.ingest(payload);
+    const blacklistSweep = applyTargetBlacklistToExistingLots(services.store);
     services.liveEvents.broadcast({
       type: "collector_sync",
       title: "Collector sync complete",
-      message: `${payload.run.machineName} submitted ${result.upserted} row${result.upserted === 1 ? "" : "s"}${result.missingMarked ? `, with ${result.missingMarked} reconciled missing/canceled row${result.missingMarked === 1 ? "" : "s"}` : ""}.`,
+      message: `${payload.run.machineName} submitted ${result.upserted} row${result.upserted === 1 ? "" : "s"}${result.missingMarked ? `, with ${result.missingMarked} reconciled missing/canceled row${result.missingMarked === 1 ? "" : "s"}` : ""}${blacklistSweep.updated ? `, auto-rejecting ${blacklistSweep.updated} blacklist match${blacklistSweep.updated === 1 ? "" : "es"}` : ""}.`,
       createdAt: new Date().toISOString(),
       payload: {
         runId: result.runId,
@@ -47,9 +48,13 @@ export async function handleApiRoutes(
         recordsReceived: payload.records.length,
         upserted: result.upserted,
         missingMarked: result.missingMarked,
+        blacklistRejected: blacklistSweep.updated,
       },
     });
-    return Response.json(result);
+    return Response.json({
+      ...result,
+      blacklistRejected: blacklistSweep.updated,
+    });
   }
 
   if (pathname === "/api/ingest/target-updates" && request.method === "POST") {
