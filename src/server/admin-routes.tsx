@@ -94,6 +94,51 @@ export async function handleAdminPages(
     return new Response(null, { status: 303, headers });
   }
 
+  if (pathname === "/admin/history/delete" && request.method === "POST") {
+    if (!authState.admin || !authState.email) {
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: "Admin access required" }, { status: 403 });
+      }
+      return redirect("/admin/login?error=Admin%20access%20required", 303);
+    }
+
+    const form = await request.formData();
+    const redirectTo = String(form.get("redirect") || "/admin/history");
+    const lotIds = Array.from(
+      new Set(
+        form
+          .getAll("lotId")
+          .map((value) => String(value).trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (!lotIds.length) {
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: "No lots selected" }, { status: 400 });
+      }
+      return redirect(redirectTo, 303);
+    }
+
+    const deletedLotIds: string[] = [];
+    for (const lotId of lotIds) {
+      if (services.store.hardDeleteLot(lotId)) {
+        deletedLotIds.push(lotId);
+      }
+    }
+
+    if (request.headers.get("x-auction-request") === "async") {
+      return Response.json({
+        ok: true,
+        deletedCount: deletedLotIds.length,
+        deletedLotIds,
+        requestedCount: lotIds.length,
+      });
+    }
+
+    return redirect(redirectTo, 303);
+  }
+
   const lotAction = parseLotActionPath(pathname);
   if (lotAction && request.method === "POST") {
     if (!authState.admin || !authState.email) {
