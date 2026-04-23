@@ -167,15 +167,29 @@ export async function handleAdminPages(
 
   if (pathname === "/admin/targets" && request.method === "POST") {
     if (!authState.admin) {
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: "Admin access required" }, { status: 403 });
+      }
       return redirect("/admin/login?error=Admin%20access%20required", 303);
     }
+
     const form = await request.formData();
     try {
-      upsertPatchedVinTarget(services.store, parseTargetForm(form));
+      const payload = parseTargetForm(form);
+      upsertPatchedVinTarget(services.store, payload);
+
+      if (request.headers.get("x-auction-request") === "async") {
+        const savedTarget = getPatchedVinTargets(services.store).find((target) => target.id === payload.id) || null;
+        return Response.json({ ok: true, target: savedTarget });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save target";
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: message }, { status: 400 });
+      }
       return redirect(`/admin?error=${encodeURIComponent(message)}`, 303);
     }
+
     return redirect("/admin", 303);
   }
 
@@ -196,17 +210,31 @@ export async function handleAdminPages(
   const targetUpdateMatch = pathname.match(/^\/admin\/targets\/([^/]+)$/);
   if (targetUpdateMatch && request.method === "POST") {
     if (!authState.admin) {
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: "Admin access required" }, { status: 403 });
+      }
       return redirect("/admin/login?error=Admin%20access%20required", 303);
     }
+
     const form = await request.formData();
     const payload = parseTargetForm(form, { id: decodeURIComponent(targetUpdateMatch[1]) });
     payload.id = decodeURIComponent(targetUpdateMatch[1]);
+
     try {
       upsertPatchedVinTarget(services.store, payload);
+
+      if (request.headers.get("x-auction-request") === "async") {
+        const savedTarget = getPatchedVinTargets(services.store).find((target) => target.id === payload.id) || null;
+        return Response.json({ ok: true, target: savedTarget });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save target";
+      if (request.headers.get("x-auction-request") === "async") {
+        return Response.json({ ok: false, error: message }, { status: 400 });
+      }
       return redirect(`/admin?error=${encodeURIComponent(message)}`, 303);
     }
+
     return redirect("/admin", 303);
   }
 
