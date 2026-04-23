@@ -75,6 +75,8 @@ function TargetCard({ target }: { target: VinTarget }) {
     <form
       action={`/admin/targets/${target.id}`}
       className="grid gap-4 rounded-[24px] border border-border/80 bg-card/90 p-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.28)] sm:p-5"
+      data-admin-target-form="true"
+      data-admin-target-id={target.id}
       method="post"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -83,18 +85,41 @@ function TargetCard({ target }: { target: VinTarget }) {
             <Badge variant={target.active ? "success" : "muted"}>{target.active ? "Active" : "Paused"}</Badge>
             {target.enabledCopart ? <Badge variant="outline">Copart</Badge> : null}
             {target.enabledIaai ? <Badge variant="outline">IAAI</Badge> : null}
-            {target.rejectColors.length ? <Badge variant="outline">{target.rejectColors.length} color reject{target.rejectColors.length === 1 ? "" : "s"}</Badge> : null}
-            {target.rejectLocations.length ? <Badge variant="outline">{target.rejectLocations.length} location reject{target.rejectLocations.length === 1 ? "" : "s"}</Badge> : null}
+
+            <span data-admin-target-colors-badge hidden={!target.rejectColors.length}>
+              <Badge variant="outline">
+                <span data-admin-target-colors-badge-label>
+                  {target.rejectColors.length} color reject{target.rejectColors.length === 1 ? "" : "s"}
+                </span>
+              </Badge>
+            </span>
+
+            <span data-admin-target-locations-badge hidden={!target.rejectLocations.length}>
+              <Badge variant="outline">
+                <span data-admin-target-locations-badge-label>
+                  {target.rejectLocations.length} location reject{target.rejectLocations.length === 1 ? "" : "s"}
+                </span>
+              </Badge>
+            </span>
           </div>
+
           <div>
             <h2 className="text-base font-semibold tracking-tight">
               {awaitingCollectorMetadata ? "Pending metadata" : target.label}
             </h2>
             <p className="text-sm text-muted-foreground">{subtitle}</p>
           </div>
+
+          <p
+            className="min-h-5 text-sm text-muted-foreground"
+            data-admin-target-save-status
+          />
         </div>
+
         <div className="flex items-center gap-2">
-          <Button size="sm" type="submit" variant="outline">Save</Button>
+          <Button data-admin-target-save-button size="sm" type="submit" variant="outline">
+            Save
+          </Button>
           <Button
             formAction={`/admin/targets/${target.id}/remove`}
             formNoValidate
@@ -119,7 +144,9 @@ function TargetCard({ target }: { target: VinTarget }) {
             placeholder="1FTEW1E5XJK"
             spellCheck={false}
           />
-          <p className="text-sm text-muted-foreground">Use <code>*</code> for wildcard characters.</p>
+          <p className="text-sm text-muted-foreground">
+            Use <code>*</code> for wildcard characters.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-4 rounded-[20px] border border-border/70 bg-muted/35 px-4 py-3">
