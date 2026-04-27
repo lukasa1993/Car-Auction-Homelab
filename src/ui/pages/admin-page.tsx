@@ -53,7 +53,7 @@ function FilterTextarea({
         {label}
       </label>
       <textarea
-        className="min-h-[104px] w-full rounded-[18px] border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+        className="min-h-26 w-full rounded-[18px] border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
         defaultValue={defaultValue}
         id={id}
         name={name}
@@ -74,7 +74,7 @@ function TargetCard({ target }: { target: VinTarget }) {
   return (
     <form
       action={`/admin/targets/${target.id}`}
-      className="grid gap-4 rounded-[24px] border border-border/80 bg-card/90 p-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.28)] sm:p-5"
+      className="grid gap-4 rounded-3xl border border-border/80 bg-card/90 p-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.28)] sm:p-5"
       data-admin-target-form="true"
       data-admin-target-id={target.id}
       method="post"
@@ -186,7 +186,7 @@ export function AdminPage({
 
   return (
     <main className="min-h-screen bg-background">
-      <div className="mx-auto flex max-w-[1120px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-280 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
         <AdminHeader active="targets" email={email} historyCount={historyCount} />
 
         <div>
@@ -197,7 +197,7 @@ export function AdminPage({
         </div>
 
         {error ? (
-          <div className="rounded-[24px] border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <div className="rounded-3xl border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             {error}
           </div>
         ) : null}
