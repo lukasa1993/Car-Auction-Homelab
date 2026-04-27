@@ -69,6 +69,30 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function isVinDebugEnabled(): boolean {
+  const value = String(process.env.AUCTION_VIN_DEBUG || process.env.DEBUG_VIN_TARGETS || "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on" || value === "debug";
+}
+
+function logVinPatternDebug(event: string, payload: Record<string, unknown>): void {
+  if (!isVinDebugEnabled()) {
+    return;
+  }
+  console.log(
+    JSON.stringify(
+      {
+        message: "vin pattern debug",
+        event,
+        ...payload,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 function slugifyVinPattern(value: string): string {
   return normalizeVinPattern(value)
     .toLowerCase()
@@ -155,8 +179,7 @@ export function inferVinTargetDefinition(value: string) {
   const year = inferVinModelYear(vinPattern);
   const keyBase = slugifyVinPattern(vinPattern) || "vin-target";
   const genericLabel = vinPrefix || vinPattern || "VIN target";
-
-  return {
+  const definition = {
     vinPattern,
     vinPrefix,
     key: `${model?.copartSlug ?? "vin"}-${keyBase}`,
@@ -170,6 +193,16 @@ export function inferVinTargetDefinition(value: string) {
     modelLabel: model?.label ?? null,
     inferredYear: year,
   };
+
+  logVinPatternDebug("target_definition_inferred", {
+    input: value,
+    normalizedVinPattern: vinPattern,
+    derivedVinPrefix: vinPrefix,
+    note: "vinPrefix is only the concrete prefix before the first wildcard. Use vinPattern for full-mask matching.",
+    definition,
+  });
+
+  return definition;
 }
 
 export function buildVinMaskRegex(mask: string, anchored = false): RegExp {
@@ -181,5 +214,21 @@ export function buildVinMaskRegex(mask: string, anchored = false): RegExp {
   const suffixLength = Math.max(0, 17 - normalized.length);
   const tail = suffixLength ? `${VIN_CORE_CHARSET}{0,${suffixLength}}` : "";
   const body = `${escaped}${tail}`;
-  return new RegExp(anchored ? `^${body}$` : `(${body})`, "i");
+  const regex = new RegExp(anchored ? `^${body}$` : `(${body})`, "i");
+
+  logVinPatternDebug("mask_regex_built", {
+    inputMask: mask,
+    normalizedMask: normalized,
+    anchored,
+    derivedPrefix: deriveVinPrefix(normalized),
+    normalizedLength: normalized.length,
+    suffixLength,
+    body,
+    regex: String(regex),
+    note: anchored
+      ? "Anchored regex is used to decide whether a full VIN/prefix matches this target."
+      : "Unanchored regex is used to extract a matching VIN from scraped text.",
+  });
+
+  return regex;
 }
