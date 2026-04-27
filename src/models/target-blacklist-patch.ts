@@ -142,10 +142,11 @@ function formatBlacklistNote(lot: Pick<LotListItem, "color" | "location">, reaso
 
 function buildGenericTargetMetadata(vinPattern: string): Pick<VinTarget, "label" | "carType" | "marker"> {
   const inferred = inferVinTargetDefinition(vinPattern);
+  const fallback = inferred.vinPrefix || inferred.vinPattern;
   return {
-    label: inferred.vinPrefix || inferred.vinPattern,
-    carType: inferred.vinPrefix || inferred.vinPattern,
-    marker: `VIN · ${inferred.vinPattern}`,
+    label: inferred.label || fallback,
+    carType: inferred.carType || inferred.label || fallback,
+    marker: inferred.marker || `VIN · ${inferred.vinPattern}`,
   };
 }
 
