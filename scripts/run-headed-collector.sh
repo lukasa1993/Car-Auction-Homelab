@@ -2,37 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG_FILE="$(mktemp)"
-trap 'rm -f "$LOG_FILE"' EXIT
 
 export AUCTION_REQUIRED_DISPLAY="${AUCTION_REQUIRED_DISPLAY:-${OPENCLAW_HEADED_DISPLAY:-:99}}"
 export DISPLAY="${DISPLAY:-$AUCTION_REQUIRED_DISPLAY}"
 
-PUBLIC_KEY_FILE="${AUCTION_COLLECTOR_PUBLIC_KEY_FILE:-$ROOT_DIR/runner-keys/collector-signing-key.pub.pem}"
-
-is_enabled() {
-  case "${1:-}" in
-    1|true|TRUE|yes|YES|on|ON|debug|DEBUG) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-PRELOAD_ARGS=()
-if is_enabled "${AUCTION_COLLECTOR_MODEL_X_DEBUG:-0}"; then
-  PRELOAD_ARGS=(--preload "$ROOT_DIR/collector/model-x-debug-preload.ts")
-fi
-
-# VIN debug must go through bootstrap so the downloaded built runtime gets the
-# candidate-level debug patch injected before execution. Running local TS only
-# logs regex construction, which hides where lots are accepted/rejected.
-if is_enabled "${AUCTION_COLLECTOR_VERBOSE:-0}" && ! is_enabled "${AUCTION_COLLECTOR_VIN_DEBUG:-0}"; then
-  exec bun "${PRELOAD_ARGS[@]}" "$ROOT_DIR/collector/auction-runner.ts" "$@"
-fi
-
-set +e
-bun "${PRELOAD_ARGS[@]}" "$ROOT_DIR/collector/bootstrap.ts" --public-key-file "$PUBLIC_KEY_FILE" "$@" >"$LOG_FILE" 2>&1
-STATUS=$?
-set -e
-
-cat "$LOG_FILE" >&2
-exit "$STATUS"
+# Headed collector is for local debugging. Run source directly so console.log
+# statements in collector/auction-runner.ts are exactly what you see.
+exec bun "$ROOT_DIR/collector/auction-runner.ts" "$@"
