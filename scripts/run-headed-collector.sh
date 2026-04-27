@@ -17,8 +17,10 @@ is_enabled() {
   esac
 }
 
+# Debug runs must use the local TypeScript source, not the downloaded built runtime.
+# The built runtime is minified and bootstrap patching can hide or corrupt debug output.
 if is_enabled "${AUCTION_COLLECTOR_VERBOSE:-0}" || is_enabled "${AUCTION_COLLECTOR_VIN_DEBUG:-0}"; then
-  exec bun "$ROOT_DIR/collector/bootstrap.ts" --public-key-file "$PUBLIC_KEY_FILE" "$@"
+  exec bun "$ROOT_DIR/collector/auction-runner.ts" "$@"
 fi
 
 set +e
