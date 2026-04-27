@@ -69,23 +69,30 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isVinDebugEnabled(): boolean {
+function isCollectorVinDebugEnabled(): boolean {
   const env = typeof process === "undefined" ? undefined : process.env;
-  const value = String(env?.AUCTION_VIN_DEBUG || env?.DEBUG_VIN_TARGETS || "")
+  const value = String(env?.AUCTION_COLLECTOR_VIN_DEBUG || "")
     .trim()
     .toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on" || value === "debug";
 }
 
-function logVinPatternDebug(event: string, payload: Record<string, unknown>): void {
-  if (!isVinDebugEnabled()) {
+function logCollectorVinPatternDebug(event: string, payload: Record<string, unknown>): void {
+  if (!isCollectorVinDebugEnabled()) {
     return;
   }
+  const processInfo = typeof process === "undefined"
+    ? {}
+    : {
+        argv: process.argv,
+        pid: process.pid,
+      };
   console.log(
     JSON.stringify(
       {
-        message: "vin pattern debug",
+        message: "collector vin debug",
         event,
+        ...processInfo,
         ...payload,
       },
       null,
@@ -195,7 +202,7 @@ export function inferVinTargetDefinition(value: string) {
     inferredYear: year,
   };
 
-  logVinPatternDebug("target_definition_inferred", {
+  logCollectorVinPatternDebug("target_definition_inferred", {
     input: value,
     normalizedVinPattern: vinPattern,
     derivedVinPrefix: vinPrefix,
@@ -217,7 +224,7 @@ export function buildVinMaskRegex(mask: string, anchored = false): RegExp {
   const body = `${escaped}${tail}`;
   const regex = new RegExp(anchored ? `^${body}$` : `(${body})`, "i");
 
-  logVinPatternDebug("mask_regex_built", {
+  logCollectorVinPatternDebug("mask_regex_built", {
     inputMask: mask,
     normalizedMask: normalized,
     anchored,
