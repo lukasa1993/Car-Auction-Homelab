@@ -17,15 +17,20 @@ is_enabled() {
   esac
 }
 
+PRELOAD_ARGS=()
+if is_enabled "${AUCTION_COLLECTOR_MODEL_X_DEBUG:-0}"; then
+  PRELOAD_ARGS=(--preload "$ROOT_DIR/collector/model-x-debug-preload.ts")
+fi
+
 # VIN debug must go through bootstrap so the downloaded built runtime gets the
 # candidate-level debug patch injected before execution. Running local TS only
 # logs regex construction, which hides where lots are accepted/rejected.
 if is_enabled "${AUCTION_COLLECTOR_VERBOSE:-0}" && ! is_enabled "${AUCTION_COLLECTOR_VIN_DEBUG:-0}"; then
-  exec bun "$ROOT_DIR/collector/auction-runner.ts" "$@"
+  exec bun "${PRELOAD_ARGS[@]}" "$ROOT_DIR/collector/auction-runner.ts" "$@"
 fi
 
 set +e
-bun "$ROOT_DIR/collector/bootstrap.ts" --public-key-file "$PUBLIC_KEY_FILE" "$@" >"$LOG_FILE" 2>&1
+bun "${PRELOAD_ARGS[@]}" "$ROOT_DIR/collector/bootstrap.ts" --public-key-file "$PUBLIC_KEY_FILE" "$@" >"$LOG_FILE" 2>&1
 STATUS=$?
 set -e
 
