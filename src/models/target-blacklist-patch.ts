@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { LotListItem, VinTarget } from "../lib/types";
 import { normalizeWhitespace } from "../lib/utils";
 import {
+  buildVinMaskRegex,
   deriveVinPrefix,
   getVinTargetValidationError,
   inferVinTargetDefinition,
@@ -97,6 +98,86 @@ function matchesLocationFilter(location: string | null | undefined, filterValue:
     }
     return candidate.includes(" ") ? normalizedLocation.includes(candidate) : locationTokens.has(candidate);
   });
+}
+
+function isVinDebugEnabled(): boolean {
+  const value = String(process.env.AUCTION_VIN_DEBUG || process.env.DEBUG_VIN_TARGETS || "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on" || value === "debug";
+}
+
+function buildVinTargetDebugSummary(target: VinTarget, index: number) {
+  const normalizedPattern = normalizeVinPattern(target.vinPattern);
+  const derivedPrefix = deriveVinPrefix(normalizedPattern);
+  const anchoredRegex = buildVinMaskRegex(normalizedPattern, true);
+  const searchRegex = buildVinMaskRegex(normalizedPattern, false);
+
+  return {
+    index,
+    id: target.id,
+    key: target.key,
+    label: target.label,
+    carType: target.carType,
+    marker: target.marker,
+    storedVinPattern: target.vinPattern,
+    normalizedVinPattern: normalizedPattern,
+    storedVinPrefix: target.vinPrefix,
+    derivedVinPrefix: derivedPrefix,
+    prefixIsOnlyBeforeFirstWildcard: derivedPrefix !== normalizedPattern,
+    patternLength: normalizedPattern.length,
+    anchoredMatchRegex: String(anchoredRegex),
+    extractSearchRegex: String(searchRegex),
+    yearFrom: target.yearFrom,
+    yearTo: target.yearTo,
+    copartSlug: target.copartSlug,
+    iaaiPath: target.iaaiPath,
+    enabledCopart: target.enabledCopart,
+    enabledIaai: target.enabledIaai,
+    active: target.active,
+    sortOrder: target.sortOrder,
+    rejectColors: target.rejectColors,
+    rejectLocations: target.rejectLocations,
+  };
+}
+
+function buildVinTargetRowDebugSummary(row: Record<string, unknown>, index: number) {
+  const vinPattern = normalizeVinPattern(String(row.vin_pattern || ""));
+  return {
+    index,
+    id: String(row.id || ""),
+    key: String(row.key || ""),
+    label: String(row.label || ""),
+    carType: String(row.car_type || ""),
+    marker: String(row.marker || ""),
+    rawVinPattern: String(row.vin_pattern || ""),
+    normalizedVinPattern: vinPattern,
+    storedVinPrefix: String(row.vin_prefix || ""),
+    derivedVinPrefix: deriveVinPrefix(vinPattern),
+    active: Number(row.active ?? 0) === 1,
+    enabledCopart: Number(row.enabled_copart ?? 0) === 1,
+    enabledIaai: Number(row.enabled_iaai ?? 0) === 1,
+    sortOrder: Number(row.sort_order ?? 0),
+    updatedAt: String(row.updated_at || ""),
+  };
+}
+
+function logVinDebug(event: string, payload: Record<string, unknown>): void {
+  if (!isVinDebugEnabled()) {
+    return;
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        message: "vin target debug",
+        event,
+        ...payload,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 export function getTargetBlacklistMatch(
@@ -202,7 +283,18 @@ export function getPatchedVinTargets(store: AuctionStore, activeOnly = false): V
   const sql = activeOnly
     ? "SELECT * FROM vin_targets WHERE active = 1 ORDER BY sort_order, key"
     : "SELECT * FROM vin_targets ORDER BY sort_order, key";
-  return (store.db.query(sql).all() as Record<string, unknown>[]).map(mapPatchedVinTarget);
+  const rows = store.db.query(sql).all() as Record<string, unknown>[];
+  const targets = rows.map(mapPatchedVinTarget);
+
+  logVinDebug("vin_targets_loaded_from_sql", {
+    activeOnly,
+    sql,
+    rowCount: rows.length,
+    rows: rows.map(buildVinTargetRowDebugSummary),
+    targets: targets.map(buildVinTargetDebugSummary),
+  });
+
+  return targets;
 }
 
 export function getPatchedScrapeConfig(store: AuctionStore): { configVersion: string; targets: VinTarget[] } {
@@ -210,9 +302,19 @@ export function getPatchedScrapeConfig(store: AuctionStore): { configVersion: st
   const row = store.db.query("SELECT MAX(updated_at) AS updated_at FROM vin_targets WHERE active = 1").get() as {
     updated_at?: string | null;
   };
+  const targets = getPatchedVinTargets(store, true);
+  const configVersion = String(row?.updated_at ?? new Date().toISOString());
+
+  logVinDebug("scrape_config_built", {
+    configVersion,
+    activeTargetCount: targets.length,
+    note: "Collector receives exactly this targets array from /api/scrape-config. vinPrefix is intentionally only the concrete prefix before the first wildcard; vinPattern is the full mask used for final regex matching.",
+    targets: targets.map(buildVinTargetDebugSummary),
+  });
+
   return {
-    configVersion: String(row?.updated_at ?? new Date().toISOString()),
-    targets: getPatchedVinTargets(store, true),
+    configVersion,
+    targets,
   };
 }
 
@@ -321,6 +423,14 @@ export function upsertPatchedVinTarget(store: AuctionStore, input: Partial<VinTa
     next.createdAt,
     next.updatedAt,
   );
+
+  logVinDebug("vin_target_upserted", {
+    inputVinPattern: input.vinPattern,
+    inferred,
+    hadExistingTarget: !!existing,
+    existing: existing ? buildVinTargetDebugSummary(existing, 0) : null,
+    next: buildVinTargetDebugSummary(next, 0),
+  });
 
   return next.id;
 }
