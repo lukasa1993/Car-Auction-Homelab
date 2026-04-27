@@ -247,7 +247,7 @@
                 Tesla VIN Decoder
             </h1>
             <p style="margin-top: 8px; color: #888; font-size: 14px;">
-                Model 3 &amp; Model Y &nbsp;•&nbsp; Full or partial VIN &nbsp;•&nbsp; 2017–2027
+                Model 3 &amp; Model Y &amp; Model X &nbsp;•&nbsp; Full or partial VIN &nbsp;•&nbsp; 2015–2027
             </p>
         </div>
 
@@ -317,7 +317,7 @@
 
         <!-- Footer -->
         <div class="footer">
-            Based on official Tesla Service Manuals — Model 3 (2017–2026) &amp; Model Y (2020–2027)
+            Based on official Tesla Service Manuals — Model 3 (2017–2026), Model Y (2020–2027) &amp; Model X (2015–2027)
         </div>
     </div>
 
@@ -403,6 +403,48 @@
                 },
                 year:  { 'S':'2025','T':'2026','V':'2027' },
                 plant: { 'A':'Austin, TX (USA)', 'B':'Gigafactory Berlin (Germany)', 'C':'Gigafactory Shanghai (China)', 'F':'Fremont, CA (USA)' }
+            },
+            // Model X – 2015-2020 (Legacy / Pre-Palladium)
+            modelX_legacy: {
+                body:      { 'C': 'MPV 5 DR / LHD (Falcon Wing)', 'D': 'MPV 5 DR / RHD (Falcon Wing)' },
+                restraint: {
+                    'A': 'Seatbelts (FR, SR×3, TR×2) · Airbags, PODS, SIR, Knee',
+                    'B': 'Seatbelts (FR, SR×3, TR×2) · Airbags, SIR',
+                    'C': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR',
+                    'D': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR, Knee'
+                },
+                fuel:  { 'E': 'Electric (Li-ion)' },
+                motor: {
+                    'A': 'Dual Motor Standard',
+                    'B': 'Dual Motor Performance',
+                    'C': 'Dual Motor Performance Ludicrous',
+                    'D': 'Dual Motor Long Range',
+                    'E': 'Dual Motor Standard Range',
+                    'F': 'Dual Motor Performance'
+                },
+                year:  { 'F':'2015','G':'2016','H':'2017','J':'2018','K':'2019','L':'2020' },
+                plant: { 'F':'Fremont, CA (USA)' }
+            },
+            // Model X – 2021-2027 (Palladium refresh)
+            modelX_palladium: {
+                body:      { 'C': 'MPV 5 DR / LHD (Falcon Wing)', 'D': 'MPV 5 DR / RHD (Falcon Wing)' },
+                restraint: {
+                    'A': 'Seatbelts (FR, SR×3, TR×2) · Airbags, PODS, SIR, Knee',
+                    'B': 'Seatbelts (FR, SR×3, TR×2) · Airbags, PODS, SIR',
+                    'C': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR',
+                    'D': 'Seatbelts (FR, SR×3) · Airbags, PODS, SIR, Knee'
+                },
+                fuel:  { 'E': 'Ternary System Li-Ion Battery' },
+                motor: {
+                    '5': 'Tri Motor Plaid',
+                    'A': 'Dual Motor Long Range',
+                    'D': 'Dual Motor Long Range',
+                    'E': 'Dual Motor Long Range',
+                    'F': 'Tri Motor Plaid',
+                    'L': 'Tri Motor Plaid'
+                },
+                year:  { 'M':'2021','N':'2022','P':'2023','R':'2024','S':'2025','T':'2026','V':'2027' },
+                plant: { 'F':'Fremont, CA (USA)' }
             }
         };
 
@@ -410,7 +452,9 @@
             model3_old: 'Model 3 · 2017–2024',
             model3_new: 'Model 3 · Highland 2024–2026',
             modelY_old: 'Model Y · 2020–2025',
-            modelY_new: 'Model Y · 2025–2027'
+            modelY_new: 'Model Y · 2025–2027',
+            modelX_legacy: 'Model X · 2015–2020',
+            modelX_palladium: 'Model X · Palladium 2021–2027'
         };
 
         // ── Core decoder ────────────────────────────────────────────────────────
@@ -432,6 +476,7 @@
             let model = null;
             if      (modelCode === '3') model = 'model3';
             else if (modelCode === 'Y') model = 'modelY';
+            else if (modelCode === 'X') model = 'modelX';
             else if (MODELY_WMI.includes(wmi)) model = 'modelY';
 
             // Determine era (default to _old until year code confirms _new)
@@ -440,6 +485,8 @@
                 era = (yearCode && ['R','S','T'].includes(yearCode)) ? 'model3_new' : 'model3_old';
             } else if (model === 'modelY') {
                 era = (yearCode && ['S','T','V'].includes(yearCode)) ? 'modelY_new' : 'modelY_old';
+            } else if (model === 'modelX') {
+                era = (yearCode && ['M','N','P','R','S','T','V'].includes(yearCode)) ? 'modelX_palladium' : 'modelX_legacy';
             }
 
             const data = era ? vinData[era] : null;
@@ -520,7 +567,9 @@
                 eraBadge.classList.toggle('partial-badge', decoded.isPartial);
             } else if (decoded.model) {
                 eraBadge.style.display = 'inline-flex';
-                eraBadge.textContent   = decoded.model === 'model3' ? 'Model 3' : 'Model Y';
+                eraBadge.textContent   = decoded.model === 'model3' ? 'Model 3'
+                                       : decoded.model === 'modelY' ? 'Model Y'
+                                       : 'Model X';
                 eraBadge.classList.remove('partial-badge');
             } else {
                 eraBadge.style.display = 'none';
@@ -535,6 +584,7 @@
             // Pos 4: model line
             const modelLabel = decoded.modelCode === '3' ? '<strong>Model 3</strong>'
                              : decoded.modelCode === 'Y' ? '<strong>Model Y</strong>'
+                             : decoded.modelCode === 'X' ? '<strong>Model X</strong>'
                              : decoded.modelCode !== null ? `<span style="color:#ff4444">Unknown model (${decoded.modelCode})</span>`
                              : null;
             html += row('4', decoded.modelCode, modelLabel, 'Model line');
@@ -591,7 +641,7 @@
             if (!decoded.model && decoded.modelCode !== null) {
                 statusEl.innerHTML = `<span class="warning">Unknown model code "${decoded.modelCode}" at position 4</span>`;
             } else if (!decoded.model) {
-                statusEl.innerHTML = `<span class="warning">Detected Tesla WMI — enter position 4 (3 = Model 3, Y = Model Y)</span>`;
+                statusEl.innerHTML = `<span class="warning">Detected Tesla WMI — enter position 4 (3 = Model 3, Y = Model Y, X = Model X)</span>`;
             } else if (decoded.isPartial) {
                 statusEl.innerHTML = `<span class="success">Partial VIN — ${decoded.providedLen} of 17 characters</span>`;
             } else {
