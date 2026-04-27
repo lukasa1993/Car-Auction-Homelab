@@ -70,7 +70,8 @@ function escapeRegex(value: string): string {
 }
 
 function isVinDebugEnabled(): boolean {
-  const value = String(process.env.AUCTION_VIN_DEBUG || process.env.DEBUG_VIN_TARGETS || "")
+  const env = typeof process === "undefined" ? undefined : process.env;
+  const value = String(env?.AUCTION_VIN_DEBUG || env?.DEBUG_VIN_TARGETS || "")
     .trim()
     .toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on" || value === "debug";
