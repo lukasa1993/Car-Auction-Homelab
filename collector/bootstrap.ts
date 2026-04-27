@@ -154,13 +154,135 @@ function replaceOneOf(source: string, searches: string[], replacement: string, l
   throw new Error(`Collector runtime patch could not find expected snippet for ${label}.`);
 }
 
+function replaceOneOfOptional(source: string, searches: string[], replacement: string, label: string): string {
+  for (const search of searches) {
+    if (source.includes(search)) {
+      console.warn(`Applied collector runtime debug patch: ${label}.`);
+      return source.replace(search, replacement);
+    }
+  }
+  console.warn(`Skipped collector runtime debug patch: could not find ${label}.`);
+  return source;
+}
+
+function injectBuiltRunnerDebugPatch(rawSource: string): string {
+  const patchMarker = "/* bootstrap runtime patches: built-vin-debug-v3 */";
+  if (rawSource.includes(patchMarker)) {
+    return rawSource;
+  }
+
+  let source = stripPatchMarkers(rawSource);
+  const debugHelpers = `
+function __collectorVinDebugEnabled(){
+  const value=String(process.env.AUCTION_COLLECTOR_VIN_DEBUG||"").trim().toLowerCase();
+  return value==="1"||value==="true"||value==="yes"||value==="on"||value==="debug";
+}
+function __collectorVinDebug(event,payload={}){
+  if(!__collectorVinDebugEnabled())return;
+  console.log(JSON.stringify({message:"collector vin debug",event,pid:process.pid,argv:process.argv,...payload},null,2));
+}
+function __collectorVinPrefix(value){
+  const normalized=String(value||"").toUpperCase().replace(/\\s+/g,"").replace(/[?*]/g,"*");
+  const wildcardIndex=normalized.indexOf("*");
+  return wildcardIndex===-1?normalized:normalized.slice(0,wildcardIndex);
+}
+function __collectorVinTargetSummary(target,index){
+  const vinPattern=String(target?.vinPattern||"");
+  return {
+    index,
+    key:target?.key,
+    label:target?.label,
+    carType:target?.carType,
+    marker:target?.marker,
+    vinPattern,
+    vinPrefix:target?.vinPrefix,
+    derivedPrefix:__collectorVinPrefix(vinPattern),
+    yearFrom:target?.yearFrom,
+    yearTo:target?.yearTo,
+    copartSlug:target?.copartSlug,
+    iaaiPath:target?.iaaiPath,
+    enabledCopart:target?.enabledCopart,
+    enabledIaai:target?.enabledIaai,
+    active:target?.active,
+    sortOrder:target?.sortOrder
+  };
+}
+function __collectorVinTextPreview(value){
+  return String(value||"").replace(/\\s+/g," ").trim().slice(0,260);
+}
+`;
+
+  source = source.startsWith("// @bun\n")
+    ? source.replace("// @bun\n", `// @bun\n${debugHelpers}\n`)
+    : `${debugHelpers}\n${source}`;
+
+  source = replaceOneOfOptional(
+    source,
+    [
+      "async function Z2(E,L){return await JE(`${E}/api/scrape-config`,{headers:{authorization:`Bearer ${L}`,\"cache-control\":\"no-store\"}})}",
+    ],
+    "async function Z2(E,L){let _=await JE(`${E}/api/scrape-config`,{headers:{authorization:`Bearer ${L}`,\"cache-control\":\"no-store\"}});__collectorVinDebug(\"config-loaded\",{baseUrl:E,configVersion:_.configVersion,targetCount:Array.isArray(_.targets)?_.targets.length:0,targets:Array.isArray(_.targets)?_.targets.map(__collectorVinTargetSummary):[]});return _}",
+    "built scrape config target dump",
+  );
+
+  source = replaceOneOfOptional(
+    source,
+    [
+      "function X0(E,L=!1){let _=C(E);if(!_)return new RegExp(L?\"^$\":\"($^)\",\"i\");let S=PE(_).replaceAll(\"\\\\*\",\"[A-HJ-NPR-Z0-9*]\"),R=Math.max(0,17-_.length),A=R?`[A-HJ-NPR-Z0-9*]{0,${R}}`:\"\",F=`${S}${A}`;return new RegExp(L?`^${F}$`:`(${F})`,\"i\`)}".replace("\\`)}", "\")}"),
+      "function X0(E,L=!1){let _=C(E);if(!_)return new RegExp(L?\"^$\":\"($^)\",\"i\");let S=PE(_).replaceAll(\"\\\\*\",\"[A-HJ-NPR-Z0-9*]\"),R=Math.max(0,17-_.length),A=R?`[A-HJ-NPR-Z0-9*]{0,${R}}`:\"\",F=`${S}${A}`;return new RegExp(L?`^${F}$`:`(${F})`,\"i\")}"
+    ],
+    "function X0(E,L=!1){let _=C(E);if(!_){let D=new RegExp(L?\"^$\":\"($^)\",\"i\");__collectorVinDebug(\"mask-regex-built\",{inputMask:E,normalizedMask:_,anchored:L,regex:String(D)});return D}let S=PE(_).replaceAll(\"\\\\*\",\"[A-HJ-NPR-Z0-9*]\"),R=Math.max(0,17-_.length),A=R?`[A-HJ-NPR-Z0-9*]{0,${R}}`:\"\",F=`${S}${A}`,D=new RegExp(L?`^${F}$`:`(${F})`,\"i\");__collectorVinDebug(\"mask-regex-built\",{inputMask:E,normalizedMask:_,derivedPrefix:__collectorVinPrefix(_),anchored:L,suffixLength:R,regex:String(D)});return D}",
+    "built VIN regex builder",
+  );
+
+  source = replaceOneOfOptional(
+    source,
+    [
+      "function U0(E=\"\",L){let _=C(E);if(!_)return null;return X0(L.vinPattern,!0).test(_)?C(L.vinPattern):null}",
+    ],
+    "function U0(E=\"\",L){let _=C(E);if(!_)return null;let S=X0(L.vinPattern,!0),R=S.test(_),A=R?C(L.vinPattern):null;__collectorVinDebug(\"vin-code-match\",{targetKey:L?.key,vinOrPrefix:E,normalized:_,targetPattern:L?.vinPattern,targetPrefix:L?.vinPrefix,regex:String(S),matched:R,matchedPattern:A});return A}",
+    "built VIN code matcher",
+  );
+
+  source = replaceOneOfOptional(
+    source,
+    [
+      "function NE(E,L){let _=E.match(X0(L.vinPattern));return C(_?.[1]||\"\")}",
+    ],
+    "function NE(E,L){let S=X0(L.vinPattern),_=E.match(S),R=C(_?.[1]||\"\");__collectorVinDebug(\"vin-extract\",{targetKey:L?.key,targetPattern:L?.vinPattern,targetPrefix:L?.vinPrefix,regex:String(S),matchedVin:R,textPreview:R?undefined:__collectorVinTextPreview(E)});return R}",
+    "built VIN extractor",
+  );
+
+  source = replaceOneOfOptional(
+    source,
+    [
+      "function X2(E,L,_,S,R){let A=Y(_.text);if(!/\\/lot\\/\\d+/i.test(_.url)&&!/\\/VehicleDetail\\/\\d+/i.test(_.url))return{value:null,filterReason:\"missing-lot-number\"};if(!l(A,_.url||\"\",R))return{value:null,filterReason:\"identity\"};let F=NE(A,R);if(!F)return{value:null,filterReason:\"vin\"};",
+    ],
+    "function X2(E,L,_,S,R){let A=Y(_.text);__collectorVinDebug(\"candidate-check\",{sourceKey:E,targetKey:R?.key,targetPattern:R?.vinPattern,targetPrefix:R?.vinPrefix,yearPage:L,url:_?.url,title:_?.title,textPreview:__collectorVinTextPreview(A)});if(!/\\/lot\\/\\d+/i.test(_.url)&&!/\\/VehicleDetail\\/\\d+/i.test(_.url))return __collectorVinDebug(\"candidate-rejected\",{sourceKey:E,targetKey:R?.key,reason:\"missing-lot-number\",url:_?.url,title:_?.title}),{value:null,filterReason:\"missing-lot-number\"};if(!l(A,_.url||\"\",R))return __collectorVinDebug(\"candidate-rejected\",{sourceKey:E,targetKey:R?.key,reason:\"identity\",url:_?.url,title:_?.title,targetCarType:R?.carType,textPreview:__collectorVinTextPreview(A)}),{value:null,filterReason:\"identity\"};let F=NE(A,R);if(!F)return __collectorVinDebug(\"candidate-rejected\",{sourceKey:E,targetKey:R?.key,reason:\"vin\",url:_?.url,title:_?.title,targetPattern:R?.vinPattern,targetPrefix:R?.vinPrefix,textPreview:__collectorVinTextPreview(A)}),{value:null,filterReason:\"vin\"};",
+    "built candidate rejection start",
+  );
+
+  source = replaceOneOfOptional(
+    source,
+    [
+      "if(Q)return{value:null,filterReason:Q};return{value:B,filterReason:null}}",
+    ],
+    "if(Q)return __collectorVinDebug(\"candidate-rejected\",{sourceKey:E,targetKey:R?.key,reason:Q,lotNumber:B?.lotNumber,vin:B?.vin,url:B?.url,auctionDate:B?.auctionDate,status:B?.status}),{value:null,filterReason:Q};__collectorVinDebug(\"candidate-accepted\",{sourceKey:E,targetKey:R?.key,lotNumber:B?.lotNumber,vin:B?.vin,modelYear:B?.modelYear,auctionDate:B?.auctionDate,status:B?.status,location:B?.location,color:B?.color,url:B?.url});return{value:B,filterReason:null}}",
+    "built candidate accepted/final rejection",
+  );
+
+  return `${patchMarker}\n${source}`;
+}
+
 function patchRunnerEntrypoint(versionDir: string, manifest: RunnerManifest): void {
   const entrypointPath = path.join(versionDir, manifest.entrypoint);
   const rawSource = readFileSync(entrypointPath, "utf8");
   if (manifest.entrypoint.endsWith(".js")) {
-    console.warn(
-      `Skipping collector runtime patch for built entrypoint ${manifest.entrypoint}. Refresh collector/release instead of patching compiled output.`,
-    );
+    const patched = injectBuiltRunnerDebugPatch(rawSource);
+    if (patched !== rawSource) {
+      writeFileSync(entrypointPath, patched);
+      console.warn(`Applied collector runtime patch for built entrypoint ${manifest.entrypoint}.`);
+    }
     return;
   }
   const patchMarker = "/* bootstrap runtime patches: iaai-location-v2 target-blacklist-v1 */";
