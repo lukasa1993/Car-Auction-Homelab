@@ -17,9 +17,10 @@ is_enabled() {
   esac
 }
 
-# Debug runs must use the local TypeScript source, not the downloaded built runtime.
-# The built runtime is minified and bootstrap patching can hide or corrupt debug output.
-if is_enabled "${AUCTION_COLLECTOR_VERBOSE:-0}" || is_enabled "${AUCTION_COLLECTOR_VIN_DEBUG:-0}"; then
+# VIN debug must go through bootstrap so the downloaded built runtime gets the
+# candidate-level debug patch injected before execution. Running local TS only
+# logs regex construction, which hides where lots are accepted/rejected.
+if is_enabled "${AUCTION_COLLECTOR_VERBOSE:-0}" && ! is_enabled "${AUCTION_COLLECTOR_VIN_DEBUG:-0}"; then
   exec bun "$ROOT_DIR/collector/auction-runner.ts" "$@"
 fi
 
@@ -27,10 +28,6 @@ set +e
 bun "$ROOT_DIR/collector/bootstrap.ts" --public-key-file "$PUBLIC_KEY_FILE" "$@" >"$LOG_FILE" 2>&1
 STATUS=$?
 set -e
-
-if [[ $STATUS -eq 0 ]]; then
-  exit 0
-fi
 
 cat "$LOG_FILE" >&2
 exit "$STATUS"
