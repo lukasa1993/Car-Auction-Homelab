@@ -236,14 +236,18 @@ export function upsertPatchedVinTarget(store: AuctionStore, input: Partial<VinTa
   const existing = existingRow ? mapPatchedVinTarget(existingRow) : null;
   const generic = buildGenericTargetMetadata(inferred.vinPattern);
   const keepExistingMetadata = existing ? !isGenericVinTargetMetadata(existing) : false;
+  const inferredMarker = inferred.modelLabel
+    ? `${inferred.modelLabel} · ${inferred.vinPattern}`
+    : `VIN · ${inferred.vinPattern}`;
+  const isDeterministicTesla = inferred.deterministicTesla;
   const now = new Date().toISOString();
-  const label = input.label ?? (keepExistingMetadata ? existing?.label ?? generic.label : generic.label);
-  const carType = input.carType ?? (keepExistingMetadata ? existing?.carType ?? generic.carType : generic.carType);
-  const marker = input.marker ?? (keepExistingMetadata ? existing?.marker ?? generic.marker : generic.marker);
-  const yearFrom = input.yearFrom ?? (existing?.yearFrom ?? inferred.inferredYear ?? inferred.yearFrom);
-  const yearTo = input.yearTo ?? (existing?.yearTo ?? inferred.inferredYear ?? inferred.yearTo);
-  const copartSlug = input.copartSlug ?? (inferred.copartSlug || existing?.copartSlug || "");
-  const iaaiPath = input.iaaiPath ?? (inferred.iaaiPath || existing?.iaaiPath || "");
+  const label = input.label ?? (isDeterministicTesla ? inferred.label : (keepExistingMetadata ? existing?.label ?? generic.label : generic.label));
+  const carType = input.carType ?? (isDeterministicTesla ? inferred.carType : (keepExistingMetadata ? existing?.carType ?? generic.carType : generic.carType));
+  const marker = input.marker ?? (isDeterministicTesla ? inferredMarker : (keepExistingMetadata ? existing?.marker ?? generic.marker : generic.marker));
+  const yearFrom = input.yearFrom ?? (isDeterministicTesla ? inferred.yearFrom : (existing?.yearFrom ?? inferred.inferredYear ?? inferred.yearFrom));
+  const yearTo = input.yearTo ?? (isDeterministicTesla ? inferred.yearTo : (existing?.yearTo ?? inferred.inferredYear ?? inferred.yearTo));
+  const copartSlug = input.copartSlug ?? (isDeterministicTesla ? inferred.copartSlug : (inferred.copartSlug || existing?.copartSlug || ""));
+  const iaaiPath = input.iaaiPath ?? (isDeterministicTesla ? inferred.iaaiPath : (inferred.iaaiPath || existing?.iaaiPath || ""));
   const rejectColors = normalizeStringList(input.rejectColors ?? existing?.rejectColors ?? []);
   const rejectLocations = normalizeStringList(input.rejectLocations ?? existing?.rejectLocations ?? []);
 

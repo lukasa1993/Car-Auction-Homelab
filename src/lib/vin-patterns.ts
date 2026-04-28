@@ -32,6 +32,15 @@ const TESLA_MODEL_BY_CODE = {
   },
 } as const;
 
+const TESLA_WMI_INFO: Record<string, string> = {
+  "5YJ": "Tesla, Inc. – Fremont, CA / Austin, TX",
+  "7SA": "Tesla, Inc. – Gigafactory Austin, TX",
+  LRW: "Tesla, Inc. – Gigafactory Shanghai",
+  XP7: "Tesla, Inc. – Gigafactory Berlin",
+};
+const TESLA_WMI_PREFIXES = Object.keys(TESLA_WMI_INFO);
+const TESLA_MODEL_Y_EXCLUSIVE_WMI = new Set(["7SA", "XP7"]);
+
 const MODEL_YEAR_BY_CODE: Record<string, number> = {
   A: 2010,
   B: 2011,
@@ -122,9 +131,73 @@ export function deriveVinPrefix(value: string): string {
   return wildcardIndex === -1 ? normalized : normalized.slice(0, wildcardIndex);
 }
 
+export function isTeslaVin(value: string): boolean {
+  const normalized = normalizeVinPattern(value);
+  return TESLA_WMI_PREFIXES.some((wmi) => normalized.startsWith(wmi));
+}
+
 export function inferTeslaModel(value: string) {
   const normalized = normalizeVinPattern(value);
-  return TESLA_MODEL_BY_CODE[normalized[3] as keyof typeof TESLA_MODEL_BY_CODE] ?? null;
+  if (!isTeslaVin(normalized)) {
+    return null;
+  }
+  const wmi = normalized.slice(0, 3);
+  const directModel = TESLA_MODEL_BY_CODE[normalized[3] as keyof typeof TESLA_MODEL_BY_CODE];
+  if (directModel) {
+    return directModel;
+  }
+  if (TESLA_MODEL_Y_EXCLUSIVE_WMI.has(wmi)) {
+    return TESLA_MODEL_BY_CODE.Y;
+  }
+  return null;
+}
+
+export type TeslaDecodeResult = {
+  wmi: string;
+  wmiMeaning: string;
+  modelLabel: "Model 3" | "Model S" | "Model X" | "Model Y";
+  carType: string;
+  copartSlug: string;
+  iaaiPath: string;
+  year: number;
+};
+
+export function decodeTeslaVin(value: string): TeslaDecodeResult | null {
+  const normalized = normalizeVinPattern(value);
+  if (normalized.length < 10) {
+    return null;
+  }
+  const wmi = normalized.slice(0, 3);
+  if (!TESLA_WMI_PREFIXES.includes(wmi)) {
+    return null;
+  }
+  const modelCode = normalized[3];
+  let model: (typeof TESLA_MODEL_BY_CODE)[keyof typeof TESLA_MODEL_BY_CODE] | null = null;
+  if (modelCode && modelCode !== VIN_WILDCARD && TESLA_MODEL_BY_CODE[modelCode as keyof typeof TESLA_MODEL_BY_CODE]) {
+    model = TESLA_MODEL_BY_CODE[modelCode as keyof typeof TESLA_MODEL_BY_CODE];
+  } else if ((!modelCode || modelCode === VIN_WILDCARD) && TESLA_MODEL_Y_EXCLUSIVE_WMI.has(wmi)) {
+    model = TESLA_MODEL_BY_CODE.Y;
+  }
+  if (!model) {
+    return null;
+  }
+  const yearCode = normalized[9];
+  if (!yearCode || yearCode === VIN_WILDCARD) {
+    return null;
+  }
+  const year = MODEL_YEAR_BY_CODE[yearCode];
+  if (!year) {
+    return null;
+  }
+  return {
+    wmi,
+    wmiMeaning: TESLA_WMI_INFO[wmi] ?? "",
+    modelLabel: model.label,
+    carType: model.carType,
+    copartSlug: model.copartSlug,
+    iaaiPath: model.iaaiPath,
+    year,
+  };
 }
 
 export function inferVinModelYear(value: string): number | null {
@@ -183,8 +256,16 @@ export function hasGenericVinTargetYearRange(value: { yearFrom?: number | null; 
 export function inferVinTargetDefinition(value: string) {
   const vinPattern = normalizeVinPattern(value);
   const vinPrefix = deriveVinPrefix(vinPattern);
-  const model = inferTeslaModel(vinPattern);
-  const year = inferVinModelYear(vinPattern);
+  const tesla = decodeTeslaVin(vinPattern);
+  const model = tesla
+    ? {
+        label: tesla.modelLabel,
+        carType: tesla.carType,
+        copartSlug: tesla.copartSlug,
+        iaaiPath: tesla.iaaiPath,
+      }
+    : inferTeslaModel(vinPattern);
+  const year = tesla?.year ?? inferVinModelYear(vinPattern);
   const keyBase = slugifyVinPattern(vinPattern) || "vin-target";
   const genericLabel = vinPrefix || vinPattern || "VIN target";
   const definition = {
@@ -194,12 +275,13 @@ export function inferVinTargetDefinition(value: string) {
     label: model?.label ?? genericLabel,
     carType: model?.carType ?? genericLabel,
     marker: model?.label ? `${model.label} · ${vinPattern}` : `VIN · ${vinPattern}`,
-    yearFrom: year ?? DEFAULT_GENERIC_YEAR_FROM,
-    yearTo: year ?? DEFAULT_GENERIC_YEAR_TO,
+    yearFrom: tesla?.year ?? year ?? DEFAULT_GENERIC_YEAR_FROM,
+    yearTo: tesla?.year ?? year ?? DEFAULT_GENERIC_YEAR_TO,
     copartSlug: model?.copartSlug ?? "",
     iaaiPath: model?.iaaiPath ?? "",
     modelLabel: model?.label ?? null,
     inferredYear: year,
+    deterministicTesla: tesla !== null,
   };
 
   logCollectorVinPatternDebug("target_definition_inferred", {
