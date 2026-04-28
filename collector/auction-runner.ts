@@ -571,15 +571,28 @@ function extractLot(text: string, url: string): string {
 }
 
 function extractLocation(text: string): string {
+  // Terminators must cover both Copart's branch-line buttons and IAAI's
+  // search-result field labels that follow `Branch:` / `Location:` in the
+  // text built by readIaaiSearchSnapshotFromHtml. Without IAAI labels here
+  // (Market:, ACV:, Auction:, ...), the non-greedy capture never finds a
+  // boundary and extractLocation returns "" — which silently bypasses the
+  // location blacklist (matchesLocationFilter treats null/empty as no-op).
+  const terminator =
+    "(?=\\s+(?:Sale Document|Available to Public|Run & Drive|Offsite|Share|More Details" +
+    "|Market:|ACV:|Auction:|Stock|Title|Primary Damage|Secondary Damage|Loss:|Odometer|Start Code|Airbags|Key:|Engine:|Fuel Type|Transmission|Driveline Type|VIN:|Vehicle Location|Location:" +
+    ")|\\s*$)";
   const branchOrLocationMatch =
-    text.match(/\bBranch:\s*([A-Za-z0-9 .,'()/-]{2,80}?)(?=\s+(?:Sale Document|Available to Public|Run & Drive|Offsite|Share|More Details|$))/i) ||
-    text.match(/\bLocation:\s*([A-Za-z0-9 .,'()/-]{2,80}?)(?=\s+(?:Sale Document|Available to Public|Run & Drive|Offsite|Share|More Details|$))/i);
+    text.match(new RegExp(`\\bBranch:\\s*([A-Za-z0-9 .,'()/-]{2,80}?)${terminator}`, "i")) ||
+    text.match(new RegExp(`\\bLocation:\\s*([A-Za-z0-9 .,'()/-]{2,80}?)${terminator}`, "i"));
   if (branchOrLocationMatch) {
     return normalizeWhitespace(branchOrLocationMatch[1]);
   }
   const patterns = [
     /\b([A-Z]{2}\s*-\s*[A-Z][A-Z -]{2,})\b/,
-    /\b([A-Za-z .'-]+\([A-Z]{2}\))\b/,
+    // Recognize "<City> (CA)" and "<City> (California)" forms used by IAAI.
+    // No trailing \b: `)` is non-word, space-after-) is also non-word, so \b
+    // never holds and the pattern would silently never match.
+    /\b([A-Za-z][A-Za-z .'-]{1,40}\((?:[A-Z]{2}|[A-Z][a-z]{2,})\))/,
     /\bLocation:\s*([A-Za-z0-9 .,'()-]{4,80})\b/i,
   ];
   for (const pattern of patterns) {

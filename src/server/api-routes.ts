@@ -133,6 +133,18 @@ export async function handleApiRoutes(
     return Response.json(services.store.getPublicLotList());
   }
 
+  // Diagnostic: recent collector runs with per-target scope notes (filter
+  // counters from collector/coverage.ts summarizeScopeCoverage). Token-gated.
+  // Used to confirm whether Copart is returning Model X listings that get
+  // filtered (and which filter), versus returning none at all.
+  if (pathname === "/api/sync-runs" && request.method === "GET") {
+    if (!requireBearer(request, services.config.ingestToken)) {
+      return unauthorizedResponse();
+    }
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    return Response.json({ runs: services.store.getRecentSyncRuns(limit) });
+  }
+
   if (pathname === "/api/push/vapid-key" && request.method === "GET") {
     return Response.json({ publicKey: services.push.getVapidPublicKey() });
   }

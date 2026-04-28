@@ -513,6 +513,41 @@ export class AuctionStore {
     };
   }
 
+  getRecentSyncRuns(limit = 20): Array<Record<string, unknown>> {
+    const rows = this.db
+      .query(
+        `SELECT id, runner_id, runner_version, machine_name, submitted_at, started_at, completed_at,
+                status, source_keys_json, covered_scopes_json, records_received, records_upserted,
+                records_missing_marked, error_text
+         FROM sync_runs
+         ORDER BY COALESCE(completed_at, submitted_at) DESC
+         LIMIT ?`,
+      )
+      .all(Math.max(1, Math.min(100, Number(limit) || 20))) as Record<string, unknown>[];
+    return rows.map((row) => {
+      let sourceKeys: unknown = [];
+      let scopes: unknown = [];
+      try { sourceKeys = JSON.parse(String(row.source_keys_json ?? "[]")); } catch { sourceKeys = []; }
+      try { scopes = JSON.parse(String(row.covered_scopes_json ?? "[]")); } catch { scopes = []; }
+      return {
+        id: row.id,
+        runnerId: row.runner_id,
+        runnerVersion: row.runner_version,
+        machineName: row.machine_name,
+        submittedAt: row.submitted_at,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        status: row.status,
+        sourceKeys,
+        scopes,
+        recordsReceived: Number(row.records_received ?? 0),
+        recordsUpserted: Number(row.records_upserted ?? 0),
+        recordsMissingMarked: Number(row.records_missing_marked ?? 0),
+        errorText: row.error_text,
+      };
+    });
+  }
+
   getLatestCollectorIngestAt(): string | null {
     const runRow = this.db.query(`
       SELECT MAX(COALESCE(completed_at, started_at, submitted_at)) AS ingested_at
