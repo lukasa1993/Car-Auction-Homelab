@@ -20,7 +20,13 @@ export interface SourceCoverageCounters {
   uniqueLots: number;
   acceptedLots: number;
   filtered: Record<FilterReason, number>;
+  // Up to MAX_FILTER_SAMPLES short strings per reason (e.g. rejected VIN,
+  // identity title, etc.). Lets the diagnostic endpoint distinguish
+  // "year code wrong" from "prefix wrong" without re-running with debug.
+  samples: Record<FilterReason, string[]>;
 }
+
+export const MAX_FILTER_SAMPLES = 5;
 
 export interface SaleWindowRecord {
   auctionDate: string;
@@ -64,6 +70,15 @@ export function createSourceCoverageCounters(): SourceCoverageCounters {
       "outside-window": 0,
       "missing-lot-number": 0,
     },
+    samples: {
+      duplicate: [],
+      identity: [],
+      vin: [],
+      year: [],
+      "not-upcoming": [],
+      "outside-window": [],
+      "missing-lot-number": [],
+    },
   };
 }
 
@@ -80,8 +95,18 @@ export function recordAcceptedLot(counters: SourceCoverageCounters): void {
   counters.acceptedLots += 1;
 }
 
-export function incrementFilterReason(counters: SourceCoverageCounters, reason: FilterReason): void {
+export function incrementFilterReason(
+  counters: SourceCoverageCounters,
+  reason: FilterReason,
+  sample?: string | null | undefined,
+): void {
   counters.filtered[reason] += 1;
+  if (sample) {
+    const list = counters.samples[reason];
+    if (list.length < MAX_FILTER_SAMPLES && !list.includes(sample)) {
+      list.push(sample);
+    }
+  }
 }
 
 export function isUpcomingStatus(record: SaleWindowRecord, nowIso: string): boolean {
@@ -187,10 +212,17 @@ export function summarizeScopeCoverage(counters: SourceCoverageCounters, stopRea
   const filtered = (Object.entries(counters.filtered) as Array<[FilterReason, number]>)
     .map(([reason, count]) => `${FILTER_REASON_LABELS[reason]}=${count}`)
     .join(",");
+  const sampleParts: string[] = [];
+  for (const [reason, list] of Object.entries(counters.samples) as Array<[FilterReason, string[]]>) {
+    if (list.length > 0) {
+      sampleParts.push(`${FILTER_REASON_LABELS[reason]}=${list.join("|")}`);
+    }
+  }
+  const samples = sampleParts.length > 0 ? ` samples[${sampleParts.join(";")}]` : "";
   return {
     status,
     stopReason,
-    notes: `pages=${counters.rawPages} raw=${counters.rawListings} unique=${counters.uniqueLots} accepted=${counters.acceptedLots} filtered[${filtered}] stop=${stopReason}`,
+    notes: `pages=${counters.rawPages} raw=${counters.rawListings} unique=${counters.uniqueLots} accepted=${counters.acceptedLots} filtered[${filtered}]${samples} stop=${stopReason}`,
   };
 }
 

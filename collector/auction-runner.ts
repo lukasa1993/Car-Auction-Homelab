@@ -102,6 +102,11 @@ interface ScrapedRecordWithImages {
 interface FilteredResult<T> {
   value: T | null;
   filterReason: FilterReason | null;
+  // Optional short string captured by the filter (e.g. the rejected VIN).
+  // Surfaced in coverage notes via incrementFilterReason so we can tell
+  // whether `vin=N` rejections are wrong year code, wrong plant, or wrong
+  // prefix without re-running the full collector.
+  filterSample?: string;
 }
 
 interface LotImageSyncState {
@@ -812,14 +817,17 @@ function buildRecord(
 ): FilteredResult<ScrapedLotRecord> {
   const text = normalizeWhitespace(candidate.text);
   if (!/\/lot\/\d+/i.test(candidate.url) && !/\/VehicleDetail\/\d+/i.test(candidate.url)) {
-    return { value: null, filterReason: "missing-lot-number" };
+    return { value: null, filterReason: "missing-lot-number", filterSample: candidate.url.slice(0, 80) };
   }
   if (!matchesVehicleIdentity(text, candidate.url || "", target)) {
-    return { value: null, filterReason: "identity" };
+    return { value: null, filterReason: "identity", filterSample: normalizeVehicleTitle(candidate.title || "").slice(0, 60) };
   }
   const vin = extractMatchingVin(text, target);
   if (!vin) {
-    return { value: null, filterReason: "vin" };
+    // Capture a 17-char VIN-like substring from text for diagnostics, even
+    // when it doesn't match the target mask.
+    const vinHint = text.match(/\b([A-HJ-NPR-Z0-9]{17})\b/i)?.[1] || "<no-vin-in-text>";
+    return { value: null, filterReason: "vin", filterSample: vinHint };
   }
   const matchedCode = matchVehicleVinCode(vin, target) || normalizeVinPattern(target.vinPattern);
   const status = inferStatus(text);
@@ -828,7 +836,7 @@ function buildRecord(
   const auctionDateRaw = dateInfo ? dateInfo.raw : "";
   const modelYear = extractModelYear(text) ?? yearPage;
   if (modelYear != null && (modelYear < target.yearFrom || modelYear > target.yearTo)) {
-    return { value: null, filterReason: "year" };
+    return { value: null, filterReason: "year", filterSample: `${vin}@${modelYear}` };
   }
   const record: ScrapedLotRecord = {
     sourceKey,
@@ -1356,7 +1364,7 @@ async function fetchIaaiDirectMatches(
       const record = buildRecord("iaai", fallbackYear, candidate, nowIso, target);
       if (!record.value) {
         if (record.filterReason) {
-          incrementFilterReason(coverageCounters, record.filterReason);
+          incrementFilterReason(coverageCounters, record.filterReason, record.filterSample);
         }
         continue;
       }
@@ -1603,15 +1611,15 @@ function buildCopartApiRecord(item: any, target: VinTarget, nowIso: string): Fil
   );
 
   if (!matchesVehicleIdentity(text, item.ldu || item.ld || "", target)) {
-    return { value: null, filterReason: "identity" };
+    return { value: null, filterReason: "identity", filterSample: vehicleTitle.slice(0, 60) };
   }
   const vin = normalizeVinPattern(String(item.fv || ""));
   const matchedCode = matchVehicleVinCode(vin, target);
   if (!matchedCode) {
-    return { value: null, filterReason: "vin" };
+    return { value: null, filterReason: "vin", filterSample: vin || "<empty>" };
   }
   if (Number(item.lcy) < target.yearFrom || Number(item.lcy) > target.yearTo) {
-    return { value: null, filterReason: "year" };
+    return { value: null, filterReason: "year", filterSample: `${vin}@${item.lcy}` };
   }
   const status: ScrapedLotRecord["status"] = item?.dynamicLotDetails?.lotSold ? "done" : "upcoming";
   const dateInfo = buildCopartApiAuctionDate(item, nowIso);
@@ -1708,7 +1716,7 @@ async function fetchCopartMatches(
         recordAcceptedLot(coverageCounters);
         acceptedOnPage += 1;
       } else if (record.filterReason) {
-        incrementFilterReason(coverageCounters, record.filterReason);
+        incrementFilterReason(coverageCounters, record.filterReason, record.filterSample);
       }
     }
 
