@@ -171,7 +171,7 @@ export async function handleApiRoutes(
       services.liveEvents.broadcast({
         type: "collector_sync",
         title: "Sold prices updated",
-        message: `${foundCount} sold price${foundCount === 1 ? "" : "s"} added from Bidfax.`,
+        message: `${foundCount} sold price${foundCount === 1 ? "" : "s"} added from bid.cars.`,
         createdAt: new Date().toISOString(),
         payload: {
           foundCount,

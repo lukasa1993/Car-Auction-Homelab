@@ -8,7 +8,7 @@ This replaces the old static report writer with a centralized Bun + SQLite servi
 - Uses React SSR with a shadcn-style Tailwind UI layer instead of string-built HTML.
 - Stores VIN targets in SQLite so scrapers fetch scope from the server.
 - Stores lots, snapshots, manual actions, and images in SQLite plus a mounted media volume.
-- Stores Bidfax sold-price results for ended lots and serves the public `/sold` explorer.
+- Stores bid.cars sold-price results for ended lots and serves the public `/sold` explorer.
 - Uses Better Auth for session-backed sign-in and sign-up.
 - Serves a signed collector manifest from `/collector/runtime/*`.
 - Lets remote machines run a tiny bootstrap script that downloads the current collector package, verifies it, and then scrapes.
@@ -158,9 +158,9 @@ Collector runtime rules:
 
 Sold-price runner rules:
 
-- Bidfax only; no alternate mirror fallback.
-- Bidfax is queried by lot number only; VIN is no longer used as a search term.
-- exact VIN or exact lot/source match is required before a final bid is stored.
+- bid.cars only; no alternate mirror fallback.
+- bid.cars detail pages are loaded directly from `(sourcePrefix, lotNumber)` — `1-` for Copart, `0-` for IAAI — so no search step is performed.
+- the parsed page must match the expected lot number before a final bid is stored; VIN is used to raise confidence when present.
 - Cloudflare or captcha gates are recorded as blocked and retried later through the same backoff path.
 
 The collector itself checks the configured collector update URL and exits if it is stale.

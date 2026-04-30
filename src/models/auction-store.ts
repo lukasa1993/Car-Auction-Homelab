@@ -299,7 +299,7 @@ function mapSoldPrice(row: Record<string, unknown>): SoldPriceRow {
     lastAttemptedAt: row.last_attempted_at ? String(row.last_attempted_at) : null,
     nextAttemptAt: row.next_attempt_at ? String(row.next_attempt_at) : null,
     foundAt: row.found_at ? String(row.found_at) : null,
-    bidfaxUrl: row.bidfax_url ? String(row.bidfax_url) : null,
+    externalUrl: row.external_url ? String(row.external_url) : null,
     matchedQuery: row.matched_query ? String(row.matched_query) : null,
     matchConfidence: nullableNumber(row.match_confidence),
     finalBidUsd: nullableNumber(row.final_bid_usd),
@@ -581,7 +581,7 @@ export class AuctionStore {
         last_attempted_at TEXT,
         next_attempt_at TEXT,
         found_at TEXT,
-        bidfax_url TEXT,
+        external_url TEXT,
         matched_query TEXT,
         match_confidence REAL,
         final_bid_usd INTEGER,
@@ -622,6 +622,13 @@ export class AuctionStore {
     }
     if (!lotColumns.has("source_raw_json")) {
       this.db.exec("ALTER TABLE lots ADD COLUMN source_raw_json TEXT");
+    }
+
+    const soldPriceColumns = new Set(
+      (this.db.query("PRAGMA table_info(lot_sold_prices)").all() as Array<Record<string, unknown>>).map((row) => String(row.name)),
+    );
+    if (soldPriceColumns.has("bidfax_url") && !soldPriceColumns.has("external_url")) {
+      this.db.exec("ALTER TABLE lot_sold_prices RENAME COLUMN bidfax_url TO external_url");
     }
   }
 
@@ -1147,7 +1154,7 @@ export class AuctionStore {
     this.db.query(`
       INSERT INTO lot_sold_prices (
         id, lot_id, lookup_status, attempt_count, last_attempted_at, next_attempt_at, found_at,
-        bidfax_url, matched_query, match_confidence, final_bid_usd, sale_date, sale_date_raw,
+        external_url, matched_query, match_confidence, final_bid_usd, sale_date, sale_date_raw,
         external_source_key, external_source_label, external_lot_number, external_vin,
         condition, damage, secondary_damage, mileage, location, color, seller, documents,
         raw_json, error_text, created_at, updated_at
@@ -1158,7 +1165,7 @@ export class AuctionStore {
         last_attempted_at = excluded.last_attempted_at,
         next_attempt_at = excluded.next_attempt_at,
         found_at = excluded.found_at,
-        bidfax_url = excluded.bidfax_url,
+        external_url = excluded.external_url,
         matched_query = excluded.matched_query,
         match_confidence = excluded.match_confidence,
         final_bid_usd = excluded.final_bid_usd,
@@ -1187,7 +1194,7 @@ export class AuctionStore {
       now,
       nextAttemptAt,
       foundAt,
-      normalizedTextOrNull(input.bidfaxUrl),
+      normalizedTextOrNull(input.externalUrl),
       normalizedTextOrNull(input.matchedQuery),
       matchConfidence,
       lookupStatus === "found" ? finalBidUsd : null,

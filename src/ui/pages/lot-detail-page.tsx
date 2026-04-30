@@ -166,10 +166,10 @@ function SalePricePanel({ detail }: { detail: LotDetail }) {
       <div className="mt-1 text-xs text-muted-foreground">
         {[soldPrice.externalSourceLabel || detail.lot.sourceLabel, soldPrice.saleDateRaw || soldPrice.saleDate].filter(Boolean).join(" · ")}
       </div>
-      {soldPrice.bidfaxUrl ? (
+      {soldPrice.externalUrl ? (
         <div className="mt-3 text-xs font-medium">
-          <a className="text-foreground underline-offset-2 hover:underline" href={soldPrice.bidfaxUrl} rel="noopener noreferrer" target="_blank">
-            View Bidfax evidence
+          <a className="text-foreground underline-offset-2 hover:underline" href={soldPrice.externalUrl} rel="noopener noreferrer" target="_blank">
+            View bid.cars evidence
           </a>
         </div>
       ) : null}

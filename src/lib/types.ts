@@ -192,7 +192,7 @@ export interface SoldPriceRow {
   lastAttemptedAt: string | null;
   nextAttemptAt: string | null;
   foundAt: string | null;
-  bidfaxUrl: string | null;
+  externalUrl: string | null;
   matchedQuery: string | null;
   matchConfidence: number | null;
   finalBidUsd: number | null;
@@ -234,7 +234,7 @@ export interface SoldPriceQueueItem {
 export interface SoldPriceResultInput {
   lotId: string;
   lookupStatus: SoldPriceLookupStatus;
-  bidfaxUrl?: string | null;
+  externalUrl?: string | null;
   matchedQuery?: string | null;
   matchConfidence?: number | null;
   finalBidUsd?: number | null;

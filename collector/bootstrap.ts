@@ -30,7 +30,7 @@ function parseArgs(argv: string[]) {
   const runnerIndex = argv.indexOf("--runner");
   const rawRunnerMode = runnerIndex !== -1 ? String(argv[runnerIndex + 1] || "") : "";
   const runnerMode: RunnerMode =
-    rawRunnerMode === "sold" || rawRunnerMode === "sold-price" || rawRunnerMode === "sold-prices" || rawRunnerMode === "bidfax"
+    rawRunnerMode === "sold" || rawRunnerMode === "sold-price" || rawRunnerMode === "sold-prices" || rawRunnerMode === "bidcars" || rawRunnerMode === "bid.cars"
       ? "sold-prices"
       : "collector";
   const baseUrl = (baseUrlIndex !== -1 ? argv[baseUrlIndex + 1] : process.env.AUCTION_BASE_URL || "https://auc.ldev.cloud").replace(/\/$/, "");

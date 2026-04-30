@@ -4,13 +4,15 @@ import { mkdir } from "node:fs/promises";
 import { chromium, type BrowserContext, type Page } from "playwright";
 
 import {
-  findBestBidfaxMatch,
-  isBidfaxChallengeHtml,
-  parseBidfaxDetailHtml,
-  parseBidfaxSearchHtml,
-  type BidfaxMatchedSale,
-  type BidfaxParsedSale,
-} from "./bidfax-parser";
+  BIDCARS_BASE_URL,
+  buildBidcarsLotUrl,
+  isBidcarsChallengeHtml,
+  isBidcarsNotFoundHtml,
+  parseBidcarsDetailHtml,
+  validateBidcarsSale,
+  type BidcarsParsedSale,
+  type BidcarsValidatedSale,
+} from "./bidcars-parser";
 
 type SourceKey = "copart" | "iaai";
 type SoldPriceLookupStatus = "found" | "not_found" | "blocked" | "failed";
@@ -38,7 +40,7 @@ interface SoldPriceQueueItem {
 interface SoldPriceResultInput {
   lotId: string;
   lookupStatus: SoldPriceLookupStatus;
-  bidfaxUrl?: string | null;
+  externalUrl?: string | null;
   matchedQuery?: string | null;
   matchConfidence?: number | null;
   finalBidUsd?: number | null;
@@ -72,9 +74,7 @@ const RUNNER_VERSION = String(packageJson.version || "0.1.0");
 const REQUIRED_DISPLAY = process.env.AUCTION_REQUIRED_DISPLAY || ":99";
 const DEFAULT_MANUAL_GATE_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_MANUAL_GATE_POLL_MS = 3000;
-const BIDFAX_BASE_URL = "https://en.bidfax.info";
 const QUERY_DELAY_MS = 2500;
-const DETAIL_DELAY_MS = 900;
 const SHARED_HEADED_BROWSER_PRIMARY_URL = process.env.AUCTION_HEADED_BROWSER_URL || "";
 const SHARED_HEADED_BROWSER_FALLBACK_URL = process.env.AUCTION_HEADED_BROWSER_FALLBACK_URL || "";
 const SHARED_HEADED_BROWSER_PASSWORD = process.env.AUCTION_HEADED_BROWSER_PASSWORD || "";
@@ -230,13 +230,13 @@ async function postResults(baseUrl: string, token: string, results: SoldPriceRes
   });
 }
 
-async function launchBidfaxContext(): Promise<BrowserContext> {
+async function launchBidcarsContext(): Promise<BrowserContext> {
   if (process.env.DISPLAY !== REQUIRED_DISPLAY) {
     throw new Error(
       `Sold-price runner must run headed on DISPLAY=${REQUIRED_DISPLAY}. Current DISPLAY=${process.env.DISPLAY || "<unset>"}. ${buildSharedHeadedBrowserHelp()}`,
     );
   }
-  const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", "playwright-profile-bidfax");
+  const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", "playwright-profile-bidcars");
   await mkdir(profileDir, { recursive: true });
   return await chromium.launchPersistentContext(profileDir, {
     headless: false,
@@ -246,7 +246,7 @@ async function launchBidfaxContext(): Promise<BrowserContext> {
   });
 }
 
-async function readBidfaxPageState(page: Page): Promise<{ blocked: boolean; ready: boolean; title: string; bodyPreview: string; html: string }> {
+async function readBidcarsPageState(page: Page): Promise<{ blocked: boolean; ready: boolean; notFound: boolean; title: string; bodyPreview: string; html: string }> {
   const html = await page.content().catch(() => "");
   const snapshot = await page.evaluate(() => {
     const bodyText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
@@ -257,11 +257,14 @@ async function readBidfaxPageState(page: Page): Promise<{ blocked: boolean; read
     };
   }).catch(() => ({ title: "", bodyPreview: "", bodyLength: 0 }));
   const lowerPreview = `${snapshot.title} ${snapshot.bodyPreview}`.toLowerCase();
-  const blocked = isBidfaxChallengeHtml(html) ||
+  const blocked = isBidcarsChallengeHtml(html) ||
     lowerPreview.includes("enable javascript and cookies") ||
-    lowerPreview.includes("confirm you're not a robot");
+    lowerPreview.includes("confirm you're not a robot") ||
+    lowerPreview.includes("checking if the site connection");
+  const notFound = !blocked && (isBidcarsNotFoundHtml(html) || lowerPreview.includes("lot not found"));
   return {
     blocked,
+    notFound,
     ready: !blocked && snapshot.bodyLength > 100,
     title: snapshot.title,
     bodyPreview: snapshot.bodyPreview,
@@ -269,47 +272,36 @@ async function readBidfaxPageState(page: Page): Promise<{ blocked: boolean; read
   };
 }
 
-async function waitForBidfaxReady(page: Page, label: string): Promise<{ html: string; blocked: boolean }> {
-  let state = await readBidfaxPageState(page);
+async function waitForBidcarsReady(page: Page, label: string): Promise<{ html: string; blocked: boolean; notFound: boolean }> {
+  let state = await readBidcarsPageState(page);
   const startedAt = Date.now();
-  while (!state.ready && !state.blocked && Date.now() - startedAt < 12000) {
+  while (!state.ready && !state.blocked && !state.notFound && Date.now() - startedAt < 12000) {
     await page.waitForTimeout(600);
-    state = await readBidfaxPageState(page);
+    state = await readBidcarsPageState(page);
   }
   if (state.blocked) {
     try {
       state = await waitForManualGateClearance({
         label,
-        reason: "Bidfax challenge",
+        reason: "bid.cars Cloudflare challenge",
         getCurrentUrl: () => page.url(),
-        readState: async () => await readBidfaxPageState(page),
+        readState: async () => await readBidcarsPageState(page),
         isResolved: (nextState) => nextState.ready && !nextState.blocked,
         summarizeState: (nextState) => `${nextState.title} ${nextState.bodyPreview}`.slice(0, 240),
       });
     } catch (error) {
       console.warn(error instanceof Error ? error.message : String(error));
-      return { html: state.html, blocked: true };
+      return { html: state.html, blocked: true, notFound: false };
     }
   }
-  return { html: state.html, blocked: state.blocked };
+  return { html: state.html, blocked: state.blocked, notFound: state.notFound };
 }
 
-function buildSearchUrl(query: string): string {
-  const params = new URLSearchParams({
-    do: "search",
-    subaction: "search",
-    story: query,
-    token2: "0",
-    action2: "search_action",
-  });
-  return `${BIDFAX_BASE_URL}/?${params.toString()}`;
-}
-
-function toResultFromSale(item: SoldPriceQueueItem, match: BidfaxMatchedSale, query: string, sale: BidfaxParsedSale): SoldPriceResultInput {
+function toResultFromSale(item: SoldPriceQueueItem, match: BidcarsValidatedSale, query: string, sale: BidcarsParsedSale): SoldPriceResultInput {
   return {
     lotId: item.lotId,
     lookupStatus: "found",
-    bidfaxUrl: sale.url,
+    externalUrl: sale.url,
     matchedQuery: query,
     matchConfidence: match.confidence,
     finalBidUsd: sale.finalBidUsd,
@@ -335,78 +327,77 @@ function toResultFromSale(item: SoldPriceQueueItem, match: BidfaxMatchedSale, qu
   };
 }
 
-async function enrichMatchedSale(page: Page, match: BidfaxMatchedSale, item: SoldPriceQueueItem): Promise<BidfaxMatchedSale> {
-  if (!match.sale.url) {
-    return match;
-  }
-  await delay(DETAIL_DELAY_MS);
-  await page.goto(match.sale.url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-  const state = await waitForBidfaxReady(page, `bidfax detail ${item.lotNumber}`);
-  if (state.blocked) {
-    return match;
-  }
-  const detailSale = parseBidfaxDetailHtml(state.html, match.sale.url);
-  if (!detailSale) {
-    return match;
-  }
-  const detailMatch = findBestBidfaxMatch([detailSale], {
-    sourceKey: item.sourceKey,
-    lotNumber: item.lotNumber,
-    vin: item.vin,
-  });
-  return detailMatch || match;
-}
-
-async function searchBidfax(page: Page, item: SoldPriceQueueItem, query: string): Promise<{ match: BidfaxMatchedSale | null; blocked: boolean }> {
-  const searchUrl = buildSearchUrl(query);
-  await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-  const state = await waitForBidfaxReady(page, `bidfax search ${item.lotNumber}`);
-  if (state.blocked) {
-    return { match: null, blocked: true };
-  }
-  const sales = parseBidfaxSearchHtml(state.html);
-  const match = findBestBidfaxMatch(sales, {
-    sourceKey: item.sourceKey,
-    lotNumber: item.lotNumber,
-    vin: item.vin,
-  });
+async function fetchBidcarsLot(page: Page, item: SoldPriceQueueItem): Promise<{ html: string; finalUrl: string; blocked: boolean; notFound: boolean }> {
+  const lotUrl = buildBidcarsLotUrl(item.sourceKey, item.lotNumber);
+  await page.goto(lotUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+  const state = await waitForBidcarsReady(page, `bid.cars ${item.sourceKey} ${item.lotNumber}`);
   return {
-    match: match ? await enrichMatchedSale(page, match, item) : null,
-    blocked: false,
+    html: state.html,
+    finalUrl: page.url() || lotUrl,
+    blocked: state.blocked,
+    notFound: state.notFound,
   };
 }
 
 async function lookupSoldPrice(page: Page, item: SoldPriceQueueItem): Promise<SoldPriceResultInput> {
   const query = item.lotNumber.trim();
-  if (query.length > 0) {
-    try {
-      const result = await searchBidfax(page, item, query);
-      if (result.blocked) {
-        return {
-          lotId: item.lotId,
-          lookupStatus: "blocked",
-          matchedQuery: query,
-          errorText: "Bidfax challenge was not cleared",
-        };
-      }
-      if (result.match) {
-        return toResultFromSale(item, result.match, query, result.match.sale);
-      }
-    } catch (error) {
+  if (query.length === 0) {
+    return {
+      lotId: item.lotId,
+      lookupStatus: "not_found",
+      matchedQuery: item.lotNumber,
+      errorText: "Empty lot number",
+    };
+  }
+  try {
+    const fetchResult = await fetchBidcarsLot(page, item);
+    if (fetchResult.blocked) {
       return {
         lotId: item.lotId,
-        lookupStatus: "failed",
+        lookupStatus: "blocked",
         matchedQuery: query,
-        errorText: error instanceof Error ? error.message : String(error),
+        errorText: "bid.cars Cloudflare challenge was not cleared",
       };
     }
+    if (fetchResult.notFound) {
+      return {
+        lotId: item.lotId,
+        lookupStatus: "not_found",
+        matchedQuery: query,
+        errorText: "bid.cars returned a not-found page",
+      };
+    }
+    const sale = parseBidcarsDetailHtml(fetchResult.html, fetchResult.finalUrl);
+    if (!sale) {
+      return {
+        lotId: item.lotId,
+        lookupStatus: "not_found",
+        matchedQuery: query,
+        errorText: "Could not extract any sold-price fields from bid.cars page",
+      };
+    }
+    const validated = validateBidcarsSale(sale, {
+      sourceKey: item.sourceKey,
+      lotNumber: query,
+      vin: item.vin,
+    });
+    if (!validated) {
+      return {
+        lotId: item.lotId,
+        lookupStatus: "not_found",
+        matchedQuery: query,
+        errorText: `bid.cars page did not match lot ${query} (${item.sourceKey})`,
+      };
+    }
+    return toResultFromSale(item, validated, query, validated.sale);
+  } catch (error) {
+    return {
+      lotId: item.lotId,
+      lookupStatus: "failed",
+      matchedQuery: query,
+      errorText: error instanceof Error ? error.message : String(error),
+    };
   }
-  return {
-    lotId: item.lotId,
-    lookupStatus: "not_found",
-    matchedQuery: query || item.lotNumber,
-    errorText: "No exact Bidfax lot/source match",
-  };
 }
 
 async function main(): Promise<void> {
@@ -418,12 +409,12 @@ async function main(): Promise<void> {
 
   await verifyRunnerFreshness(args.updateBaseUrl);
   const queue = await fetchQueue(args.baseUrl, ingestToken, args.limit);
-  console.log(`Loaded ${queue.length} sold-price candidate${queue.length === 1 ? "" : "s"} from ${args.baseUrl}.`);
+  console.log(`Loaded ${queue.length} sold-price candidate${queue.length === 1 ? "" : "s"} from ${args.baseUrl} (source: ${BIDCARS_BASE_URL}).`);
   if (queue.length === 0) {
     return;
   }
 
-  const context = await launchBidfaxContext();
+  const context = await launchBidcarsContext();
   const results: SoldPriceResultInput[] = [];
   try {
     const page = context.pages()[0] || await context.newPage();

@@ -244,9 +244,9 @@ function SoldTable({ items, filters }: { items: SoldPriceExplorerItem[]; filters
                   <div className="text-base text-muted-foreground sm:text-sm">{item.soldPrice.mileage || item.soldPrice.documents || ""}</div>
                 </td>
                 <td className="py-3 pl-3 text-right align-middle">
-                  {item.soldPrice.bidfaxUrl ? (
-                    <a href={item.soldPrice.bidfaxUrl} rel="noopener noreferrer" target="_blank">
-                      <Button size="sm" type="button" variant="outline">Bidfax</Button>
+                  {item.soldPrice.externalUrl ? (
+                    <a href={item.soldPrice.externalUrl} rel="noopener noreferrer" target="_blank">
+                      <Button size="sm" type="button" variant="outline">bid.cars</Button>
                     </a>
                   ) : null}
                 </td>
