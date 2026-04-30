@@ -377,11 +377,8 @@ async function searchBidfax(page: Page, item: SoldPriceQueueItem, query: string)
 }
 
 async function lookupSoldPrice(page: Page, item: SoldPriceQueueItem): Promise<SoldPriceResultInput> {
-  const queries = Array.from(new Set([item.vin, item.lotNumber].filter((value): value is string => !!value && value.trim().length > 0)));
-  for (const [index, query] of queries.entries()) {
-    if (index > 0) {
-      await delay(QUERY_DELAY_MS);
-    }
+  const query = item.lotNumber.trim();
+  if (query.length > 0) {
     try {
       const result = await searchBidfax(page, item, query);
       if (result.blocked) {
@@ -407,8 +404,8 @@ async function lookupSoldPrice(page: Page, item: SoldPriceQueueItem): Promise<So
   return {
     lotId: item.lotId,
     lookupStatus: "not_found",
-    matchedQuery: queries[0] || item.lotNumber,
-    errorText: "No exact Bidfax VIN or lot/source match",
+    matchedQuery: query || item.lotNumber,
+    errorText: "No exact Bidfax lot/source match",
   };
 }
 

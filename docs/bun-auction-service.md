@@ -159,7 +159,7 @@ Collector runtime rules:
 Sold-price runner rules:
 
 - Bidfax only; no alternate mirror fallback.
-- VIN search is attempted before lot-number search.
+- Bidfax is queried by lot number only; VIN is no longer used as a search term.
 - exact VIN or exact lot/source match is required before a final bid is stored.
 - Cloudflare or captcha gates are recorded as blocked and retried later through the same backoff path.
 
