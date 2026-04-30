@@ -7,6 +7,7 @@ import {
   BIDCARS_BASE_URL,
   buildBidcarsLotUrl,
   isBidcarsChallengeHtml,
+  isBidcarsChallengeRendered,
   isBidcarsNotFoundHtml,
   parseBidcarsDetailHtml,
   validateBidcarsSale,
@@ -256,12 +257,11 @@ async function readBidcarsPageState(page: Page): Promise<{ blocked: boolean; rea
       bodyLength: bodyText.length,
     };
   }).catch(() => ({ title: "", bodyPreview: "", bodyLength: 0 }));
-  const lowerPreview = `${snapshot.title} ${snapshot.bodyPreview}`.toLowerCase();
-  const blocked = isBidcarsChallengeHtml(html) ||
-    lowerPreview.includes("enable javascript and cookies") ||
-    lowerPreview.includes("confirm you're not a robot") ||
-    lowerPreview.includes("checking if the site connection");
-  const notFound = !blocked && (isBidcarsNotFoundHtml(html) || lowerPreview.includes("lot not found"));
+  const blocked = isBidcarsChallengeRendered(snapshot.title, snapshot.bodyPreview) || isBidcarsChallengeHtml(html);
+  const notFound = !blocked && (
+    isBidcarsNotFoundHtml(html) ||
+    snapshot.bodyPreview.toLowerCase().includes("lot not found")
+  );
   return {
     blocked,
     notFound,

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildBidcarsLotUrl,
   isBidcarsChallengeHtml,
+  isBidcarsChallengeRendered,
   parseBidcarsDetailHtml,
   validateBidcarsSale,
 } from "./bidcars-parser";
@@ -106,10 +107,25 @@ describe("bid.cars parser", () => {
     expect(wrongLot).toBeNull();
   });
 
-  test("detects Cloudflare challenge pages", () => {
+  test("detects Cloudflare challenge pages from raw HTML", () => {
     expect(isBidcarsChallengeHtml("<title>Just a moment...</title>")).toBe(true);
-    expect(isBidcarsChallengeHtml("<script src=\"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1\"></script>")).toBe(true);
+    expect(isBidcarsChallengeHtml("<form id=\"challenge-form\" action=\"/\"></form>")).toBe(true);
+    expect(isBidcarsChallengeHtml("<div id=\"challenge-running\"></div>")).toBe(true);
+    expect(isBidcarsChallengeHtml("<div id=\"challenge-stage\"></div>")).toBe(true);
     expect(isBidcarsChallengeHtml("<h1>Real page content here</h1>")).toBe(false);
+    // Plain script reference to the cdn-cgi endpoint is left on every cleared bid.cars page,
+    // so it must not be treated as a challenge by itself.
+    expect(
+      isBidcarsChallengeHtml("<script src=\"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1\"></script>"),
+    ).toBe(false);
+  });
+
+  test("detects Cloudflare challenge pages from rendered title and body", () => {
+    expect(isBidcarsChallengeRendered("Just a moment...", "")).toBe(true);
+    expect(isBidcarsChallengeRendered("", "Verify you are human by completing the action below.")).toBe(true);
+    expect(isBidcarsChallengeRendered("", "Checking your browser before accessing bid.cars")).toBe(true);
+    expect(isBidcarsChallengeRendered("", "Please enable JavaScript and cookies to continue.")).toBe(true);
+    expect(isBidcarsChallengeRendered("2026 Tesla MODEL Y - Lot 77740985", "Sold for $32,500 VIN 7SAYGDEE2TA575880")).toBe(false);
   });
 
   test("parses date variants", () => {

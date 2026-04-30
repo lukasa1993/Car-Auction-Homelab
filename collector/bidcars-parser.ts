@@ -319,14 +319,40 @@ export function parseBidcarsDetailHtml(html: string, url: string | null, baseUrl
 }
 
 export function isBidcarsChallengeHtml(html: string): boolean {
-  const text = String(html || "").toLowerCase();
-  return (
-    text.includes("just a moment") ||
-    text.includes("cf-chl") ||
-    text.includes("enable javascript and cookies to continue") ||
-    text.includes("/cdn-cgi/challenge-platform/") ||
-    text.includes("checking if the site connection is secure")
-  );
+  const lower = String(html || "").toLowerCase();
+  const titleMatch = lower.match(/<title[^>]*>([^<]*)<\/title>/);
+  const title = titleMatch ? titleMatch[1].trim() : "";
+  if (title.startsWith("just a moment")) {
+    return true;
+  }
+  if (/<form[^>]+id=["']challenge-form["']/.test(lower)) {
+    return true;
+  }
+  if (/<div[^>]+id=["']challenge-(running|stage|body)["']/.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+export function isBidcarsChallengeRendered(title: string, bodyPreview: string): boolean {
+  const lowerTitle = title.toLowerCase().trim();
+  const lowerBody = bodyPreview.toLowerCase();
+  if (lowerTitle.startsWith("just a moment")) {
+    return true;
+  }
+  if (lowerBody.includes("verify you are human") || lowerBody.includes("verifying you are human")) {
+    return true;
+  }
+  if (lowerBody.includes("checking your browser") || lowerBody.includes("checking if the site connection is secure")) {
+    return true;
+  }
+  if (lowerBody.includes("enable javascript and cookies to continue")) {
+    return true;
+  }
+  if (lowerBody.includes("needs to review the security of your connection")) {
+    return true;
+  }
+  return false;
 }
 
 export function isBidcarsNotFoundHtml(html: string): boolean {
