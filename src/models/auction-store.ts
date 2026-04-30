@@ -1211,6 +1211,17 @@ export class AuctionStore {
       now,
     );
 
+    if (lookupStatus === "found") {
+      const externalVin = normalizedTextOrNull(input.externalVin);
+      if (externalVin && /^[A-HJ-NPR-Z0-9]{17}$/i.test(externalVin)) {
+        this.db.query(`
+          UPDATE lots
+          SET vin = ?, updated_at = ?
+          WHERE id = ?
+        `).run(externalVin.toUpperCase(), now, input.lotId);
+      }
+    }
+
     return true;
   }
 
