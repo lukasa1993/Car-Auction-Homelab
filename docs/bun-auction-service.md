@@ -8,6 +8,7 @@ This replaces the old static report writer with a centralized Bun + SQLite servi
 - Uses React SSR with a shadcn-style Tailwind UI layer instead of string-built HTML.
 - Stores VIN targets in SQLite so scrapers fetch scope from the server.
 - Stores lots, snapshots, manual actions, and images in SQLite plus a mounted media volume.
+- Stores Bidfax sold-price results for ended lots and serves the public `/sold` explorer.
 - Uses Better Auth for session-backed sign-in and sign-up.
 - Serves a signed collector manifest from `/collector/runtime/*`.
 - Lets remote machines run a tiny bootstrap script that downloads the current collector package, verifies it, and then scrapes.
@@ -133,6 +134,12 @@ cd /path/to/Car-Auction-Homelab
 bash scripts/run-headed-collector.sh --site copart,iaai
 ```
 
+After a successful collector run, fetch sold prices for ended lots:
+
+```bash
+bash scripts/run-sold-price-runner.sh --limit 20
+```
+
 The bootstrap:
 
 - downloads the signed collector manifest
@@ -148,6 +155,13 @@ Collector runtime rules:
 - shared browser UI is the default manual intervention path
 - captcha or similar human gates pause the run until cleared or until `AUCTION_MANUAL_GATE_TIMEOUT_MS` expires
 - the wrapper script stays quiet on success so cron only alerts on actual failures
+
+Sold-price runner rules:
+
+- Bidfax only; no alternate mirror fallback.
+- VIN search is attempted before lot-number search.
+- exact VIN or exact lot/source match is required before a final bid is stored.
+- Cloudflare or captcha gates are recorded as blocked and retried later through the same backoff path.
 
 The collector itself checks the configured collector update URL and exits if it is stale.
 

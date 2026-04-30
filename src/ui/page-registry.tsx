@@ -6,6 +6,7 @@ import { AdminPage, type AdminPageProps } from "./pages/admin-page";
 import { AuthPage, type AuthPageProps } from "./pages/auth-page";
 import { LotDetailPage, type LotDetailPageProps } from "./pages/lot-detail-page";
 import { MainPage, type MainPageProps } from "./pages/main-page";
+import { SoldPage, type SoldPageProps } from "./pages/sold-page";
 import type { DateRenderConfig } from "../lib/date-render";
 
 type AppPageBase = {
@@ -18,7 +19,8 @@ export type AppPage =
   | ({ kind: "admin-history"; props: AdminHistoryPageProps } & AppPageBase)
   | ({ kind: "auth"; props: AuthPageProps } & AppPageBase)
   | ({ kind: "lot-detail"; props: LotDetailPageProps } & AppPageBase)
-  | ({ kind: "main"; props: MainPageProps } & AppPageBase);
+  | ({ kind: "main"; props: MainPageProps } & AppPageBase)
+  | ({ kind: "sold"; props: SoldPageProps } & AppPageBase);
 
 export function renderAppPage(page: AppPage): React.ReactElement {
   let content: React.ReactElement;
@@ -37,6 +39,9 @@ export function renderAppPage(page: AppPage): React.ReactElement {
       break;
     case "main":
       content = <MainPage {...page.props} />;
+      break;
+    case "sold":
+      content = <SoldPage {...page.props} />;
       break;
     default: {
       const exhaustivePage: never = page;

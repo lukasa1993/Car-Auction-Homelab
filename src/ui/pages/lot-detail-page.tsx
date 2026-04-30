@@ -10,6 +10,7 @@ import {
   extractLotColor,
   formatAuctionCountdown,
   formatBytes,
+  formatUsd,
   hasExactAuctionTime,
   stripTeslaPrefix,
 } from "../format";
@@ -148,6 +149,34 @@ function Countdown({ auctionDate }: { auctionDate: string }) {
   );
 }
 
+function SalePricePanel({ detail }: { detail: LotDetail }) {
+  const soldPrice = detail.soldPrice;
+  if (!soldPrice || soldPrice.lookupStatus !== "found") {
+    return null;
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/70 p-4">
+      <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        Sold price
+      </div>
+      <div className="mt-1 font-display text-3xl font-semibold tabular-nums tracking-tight">
+        {formatUsd(soldPrice.finalBidUsd)}
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {[soldPrice.externalSourceLabel || detail.lot.sourceLabel, soldPrice.saleDateRaw || soldPrice.saleDate].filter(Boolean).join(" · ")}
+      </div>
+      {soldPrice.bidfaxUrl ? (
+        <div className="mt-3 text-xs font-medium">
+          <a className="text-foreground underline-offset-2 hover:underline" href={soldPrice.bidfaxUrl} rel="noopener noreferrer" target="_blank">
+            View Bidfax evidence
+          </a>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
   const lot = detail.lot;
   const title = stripTeslaPrefix(lot.carType);
@@ -258,6 +287,7 @@ export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
           <ImageGallery images={detail.images} title={heading} />
 
           <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
+            <SalePricePanel detail={detail} />
             {showCountdown && lot.auctionDate ? <Countdown auctionDate={lot.auctionDate} /> : null}
 
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5">

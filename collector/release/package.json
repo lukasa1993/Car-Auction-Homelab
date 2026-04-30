@@ -5,7 +5,8 @@
   "version": "2026.04.06.2",
   "scripts": {
     "bootstrap": "bun bootstrap.js",
-    "collect": "bun auction-runner.js"
+    "collect": "bun auction-runner.js",
+    "sold-prices": "bun sold-price-runner.js"
   },
   "dependencies": {
     "luxon": "3.7.2",

@@ -284,3 +284,139 @@ describe("AuctionStore ingest safeguards", () => {
     expect(replacement.sourceUrl).toBe(hdImage.sourceUrl);
   });
 });
+
+describe("AuctionStore sold-price tracking", () => {
+  test("queues ended public lots for sold-price lookup", () => {
+    const store = createStore();
+    store.upsertVinTarget({
+      key: "test-target",
+      vinPattern: "5YJ3E1EA*",
+      label: "Model 3 test",
+      carType: "Tesla Model 3",
+      marker: "VIN · 5YJ3E1EA*",
+      yearFrom: 2021,
+      yearTo: 2021,
+    });
+    store.ingest(createPayload([
+      createRecord({
+        auctionDate: "2020-01-01T10:00:00Z",
+        auctionDateRaw: "Jan 01 2020 10:00 UTC",
+        status: "done",
+      }),
+    ]));
+
+    const queue = store.getSoldPriceQueue(10);
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({
+      lotNumber: "12345678",
+      sourceKey: "copart",
+      vin: "5YJ3E1EA0MF000001",
+    });
+  });
+
+  test("upserts sold-price results and preserves confirmed results from later failures", () => {
+    const store = createStore();
+    store.upsertVinTarget({
+      key: "test-target",
+      vinPattern: "5YJ3E1EA*",
+      label: "Model 3 test",
+      carType: "Tesla Model 3",
+      marker: "VIN · 5YJ3E1EA*",
+      yearFrom: 2021,
+      yearTo: 2021,
+    });
+    store.ingest(createPayload([createRecord({ status: "done", auctionDate: "2020-01-01T10:00:00Z" })]));
+    const lotId = store.getLotDetail("copart", "12345678")?.lot.id;
+    expect(lotId).toBeTruthy();
+
+    store.recordSoldPriceResults([
+      {
+        lotId: lotId!,
+        lookupStatus: "found",
+        matchedQuery: "5YJ3E1EA0MF000001",
+        matchConfidence: 1,
+        finalBidUsd: 12300,
+        saleDate: "2020-01-02",
+        saleDateRaw: "02.01.2020",
+        bidfaxUrl: "https://en.bidfax.info/example",
+        externalSourceKey: "copart",
+        externalSourceLabel: "Copart",
+        externalLotNumber: "12345678",
+        externalVin: "5YJ3E1EA0MF000001",
+      },
+    ]);
+    store.recordSoldPriceResults([
+      {
+        lotId: lotId!,
+        lookupStatus: "failed",
+        matchedQuery: "12345678",
+        errorText: "temporary failure",
+      },
+    ]);
+
+    const detail = store.getLotDetail("copart", "12345678");
+    expect(detail?.soldPrice?.lookupStatus).toBe("found");
+    expect(detail?.soldPrice?.finalBidUsd).toBe(12300);
+    expect(detail?.soldPrice?.attemptCount).toBe(2);
+    expect(store.getSoldPriceQueue(10)).toHaveLength(0);
+  });
+
+  test("excludes removed sold lots from the public sold explorer", () => {
+    const store = createStore();
+    store.ingest(createPayload([createRecord({ status: "done", auctionDate: "2020-01-01T10:00:00Z" })]));
+    const detail = store.getLotDetail("copart", "12345678");
+    expect(detail).not.toBeNull();
+    store.recordSoldPriceResults([
+      {
+        lotId: detail!.lot.id,
+        lookupStatus: "found",
+        finalBidUsd: 12000,
+        bidfaxUrl: "https://en.bidfax.info/example",
+        externalSourceKey: "copart",
+        externalLotNumber: "12345678",
+      },
+    ]);
+    expect(store.getSoldPriceExplorerItems()).toHaveLength(1);
+
+    store.setWorkflowState(detail!.lot.id, "removed", "test", null);
+    expect(store.getSoldPriceExplorerItems()).toHaveLength(0);
+  });
+
+  test("flags internal-history sold-price outliers after enough rows exist", () => {
+    const store = createStore();
+    const records = [10000, 10200, 10500, 10700, 11000, 50000].map((price, index) =>
+      createRecord({
+        lotNumber: `9000000${index}`,
+        vin: `5YJ3E1EA0MF00000${index}`,
+        sourceDetailId: `detail-${index}`,
+        status: "done",
+        auctionDate: "2020-01-01T10:00:00Z",
+        url: `https://www.copart.com/lot/9000000${index}/example`,
+        sourceRaw: { price },
+      }),
+    );
+    store.ingest(createPayload(records));
+
+    for (const [index, price] of [10000, 10200, 10500, 10700, 11000, 50000].entries()) {
+      const detail = store.getLotDetail("copart", `9000000${index}`);
+      expect(detail).not.toBeNull();
+      store.recordSoldPriceResults([
+        {
+          lotId: detail!.lot.id,
+          lookupStatus: "found",
+          finalBidUsd: price,
+          saleDate: "2020-01-02",
+          bidfaxUrl: `https://en.bidfax.info/example-${index}`,
+          externalSourceKey: "copart",
+          externalLotNumber: `9000000${index}`,
+          externalVin: `5YJ3E1EA0MF00000${index}`,
+        },
+      ]);
+    }
+
+    const outlier = store.getSoldPriceExplorerItems().find((item) => item.lotNumber === "90000005");
+    expect(outlier?.stats.groupCount).toBe(6);
+    expect(outlier?.stats.outlier).toBe("high");
+    expect(outlier?.stats.deltaUsd).toBeGreaterThan(0);
+  });
+});

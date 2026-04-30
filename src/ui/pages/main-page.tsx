@@ -315,6 +315,12 @@ export function MainPage({
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            <a
+              className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+              href="/sold"
+            >
+              Sold
+            </a>
             {auth.admin ? (
               <a
                 className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"

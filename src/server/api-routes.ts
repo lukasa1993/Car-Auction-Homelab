@@ -1,5 +1,5 @@
 import type { AuthState, ServerServices } from "./context";
-import type { IngestPayload, SourceKey, TargetMetadataUpdatePayload } from "../lib/types";
+import type { IngestPayload, SoldPriceResultInput, SourceKey, TargetMetadataUpdatePayload } from "../lib/types";
 import { parseBoolean } from "../lib/utils";
 import { applyTargetBlacklistToExistingLots, getPatchedScrapeConfig } from "../models/target-blacklist-patch";
 import { badRequestResponse, unauthorizedResponse } from "./responses";
@@ -143,6 +143,44 @@ export async function handleApiRoutes(
     }
     const limit = Number(url.searchParams.get("limit") ?? "20");
     return Response.json({ runs: services.store.getRecentSyncRuns(limit) });
+  }
+
+  if (pathname === "/api/sold-price/queue" && request.method === "GET") {
+    if (!requireBearer(request, services.config.ingestToken)) {
+      return unauthorizedResponse();
+    }
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    return Response.json({
+      now: new Date().toISOString(),
+      lots: services.store.getSoldPriceQueue(limit),
+    });
+  }
+
+  if (pathname === "/api/sold-price/results" && request.method === "POST") {
+    if (!requireBearer(request, services.config.ingestToken)) {
+      return unauthorizedResponse();
+    }
+    const body = await request.json() as { results?: SoldPriceResultInput[] } | SoldPriceResultInput[];
+    const results = Array.isArray(body) ? body : body?.results;
+    if (!Array.isArray(results)) {
+      return badRequestResponse("Malformed sold-price results payload");
+    }
+    const summary = services.store.recordSoldPriceResults(results);
+    const foundCount = results.filter((result) => result.lookupStatus === "found").length;
+    if (foundCount > 0) {
+      services.liveEvents.broadcast({
+        type: "collector_sync",
+        title: "Sold prices updated",
+        message: `${foundCount} sold price${foundCount === 1 ? "" : "s"} added from Bidfax.`,
+        createdAt: new Date().toISOString(),
+        payload: {
+          foundCount,
+          accepted: summary.accepted,
+          skipped: summary.skipped,
+        },
+      });
+    }
+    return Response.json(summary);
   }
 
   if (pathname === "/api/push/vapid-key" && request.method === "GET") {

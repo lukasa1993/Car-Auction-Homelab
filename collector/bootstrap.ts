@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 
 type SourceKey = "copart" | "iaai";
+type RunnerMode = "collector" | "sold-prices";
 
 interface RunnerManifestFile {
   path: string;
@@ -26,9 +27,16 @@ function parseArgs(argv: string[]) {
   const updateBaseUrlIndex = argv.indexOf("--update-base-url");
   const homeIndex = argv.indexOf("--collector-home") !== -1 ? argv.indexOf("--collector-home") : argv.indexOf("--runner-home");
   const keyIndex = argv.indexOf("--public-key-file");
+  const runnerIndex = argv.indexOf("--runner");
+  const rawRunnerMode = runnerIndex !== -1 ? String(argv[runnerIndex + 1] || "") : "";
+  const runnerMode: RunnerMode =
+    rawRunnerMode === "sold" || rawRunnerMode === "sold-price" || rawRunnerMode === "sold-prices" || rawRunnerMode === "bidfax"
+      ? "sold-prices"
+      : "collector";
   const baseUrl = (baseUrlIndex !== -1 ? argv[baseUrlIndex + 1] : process.env.AUCTION_BASE_URL || "https://auc.ldev.cloud").replace(/\/$/, "");
   return {
     baseUrl,
+    runnerMode,
     updateBaseUrl: (
       updateBaseUrlIndex !== -1
         ? argv[updateBaseUrlIndex + 1]
@@ -40,10 +48,10 @@ function parseArgs(argv: string[]) {
         ? argv[keyIndex + 1]
         : process.env.AUCTION_COLLECTOR_PUBLIC_KEY_FILE || process.env.AUCTION_RUNNER_PUBLIC_KEY_FILE || "",
     passthroughArgs: argv.filter((value, index) => {
-      if (["--base-url", "--update-base-url", "--collector-home", "--runner-home", "--public-key-file"].includes(value)) {
+      if (["--base-url", "--update-base-url", "--collector-home", "--runner-home", "--public-key-file", "--runner"].includes(value)) {
         return false;
       }
-      if (index > 0 && ["--base-url", "--update-base-url", "--collector-home", "--runner-home", "--public-key-file"].includes(argv[index - 1])) {
+      if (index > 0 && ["--base-url", "--update-base-url", "--collector-home", "--runner-home", "--public-key-file", "--runner"].includes(argv[index - 1])) {
         return false;
       }
       return true;
@@ -411,6 +419,7 @@ function spawnCollectorProcess({
   updateBaseUrl,
   passthroughArgs,
   siteKey,
+  entrypoint,
 }: {
   versionDir: string;
   manifest: RunnerManifest;
@@ -418,11 +427,12 @@ function spawnCollectorProcess({
   updateBaseUrl: string;
   passthroughArgs: string[];
   siteKey?: SourceKey;
+  entrypoint?: string;
 }) {
   const childArgs = [
     "bun",
     "run",
-    manifest.entrypoint,
+    entrypoint || manifest.entrypoint,
     "--base-url",
     baseUrl,
     "--update-base-url",
@@ -450,6 +460,19 @@ async function main(): Promise<void> {
   const signature = await fetchText(`${args.updateBaseUrl}/manifest.sig`);
   verifyManifest(manifest, signature.trim(), publicKeyPem);
   const versionDir = await ensureRunnerVersion(args.updateBaseUrl, args.runnerHome, manifest);
+
+  if (args.runnerMode === "sold-prices") {
+    const child = spawnCollectorProcess({
+      versionDir,
+      manifest,
+      baseUrl: args.baseUrl,
+      updateBaseUrl: args.updateBaseUrl,
+      passthroughArgs: args.passthroughArgs,
+      entrypoint: "sold-price-runner.js",
+    });
+    const exitCode = await child.exited;
+    process.exit(exitCode);
+  }
 
   const selectedSites = parseSelectedSites(args.passthroughArgs);
   const passthroughArgs = stripSiteArg(args.passthroughArgs);

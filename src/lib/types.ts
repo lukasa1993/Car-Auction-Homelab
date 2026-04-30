@@ -4,6 +4,8 @@ export type LotStatus = "upcoming" | "done" | "unknown" | "missing" | "canceled"
 
 export type WorkflowState = "new" | "approved" | "removed";
 
+export type SoldPriceLookupStatus = "found" | "not_found" | "blocked" | "failed";
+
 export interface VinTarget {
   id: string;
   key: string;
@@ -179,6 +181,131 @@ export interface LotDetail {
   images: LotImageRow[];
   snapshots: LotSnapshotRow[];
   actions: LotActionRow[];
+  soldPrice: SoldPriceRow | null;
+}
+
+export interface SoldPriceRow {
+  id: string;
+  lotId: string;
+  lookupStatus: SoldPriceLookupStatus;
+  attemptCount: number;
+  lastAttemptedAt: string | null;
+  nextAttemptAt: string | null;
+  foundAt: string | null;
+  bidfaxUrl: string | null;
+  matchedQuery: string | null;
+  matchConfidence: number | null;
+  finalBidUsd: number | null;
+  saleDate: string | null;
+  saleDateRaw: string | null;
+  externalSourceKey: SourceKey | null;
+  externalSourceLabel: string | null;
+  externalLotNumber: string | null;
+  externalVin: string | null;
+  condition: string | null;
+  damage: string | null;
+  secondaryDamage: string | null;
+  mileage: string | null;
+  location: string | null;
+  color: string | null;
+  seller: string | null;
+  documents: string | null;
+  rawJson: string | null;
+  errorText: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SoldPriceQueueItem {
+  lotId: string;
+  sourceKey: SourceKey;
+  sourceLabel: string;
+  targetKey: string | null;
+  lotNumber: string;
+  vin: string | null;
+  modelYear: number | null;
+  carType: string;
+  marker: string;
+  auctionDate: string | null;
+  status: LotStatus;
+  url: string;
+}
+
+export interface SoldPriceResultInput {
+  lotId: string;
+  lookupStatus: SoldPriceLookupStatus;
+  bidfaxUrl?: string | null;
+  matchedQuery?: string | null;
+  matchConfidence?: number | null;
+  finalBidUsd?: number | null;
+  saleDate?: string | null;
+  saleDateRaw?: string | null;
+  externalSourceKey?: SourceKey | null;
+  externalSourceLabel?: string | null;
+  externalLotNumber?: string | null;
+  externalVin?: string | null;
+  condition?: string | null;
+  damage?: string | null;
+  secondaryDamage?: string | null;
+  mileage?: string | null;
+  location?: string | null;
+  color?: string | null;
+  seller?: string | null;
+  documents?: string | null;
+  raw?: unknown;
+  errorText?: string | null;
+}
+
+export interface SoldPriceStats {
+  groupKey: string;
+  groupLabel: string;
+  groupCount: number;
+  medianUsd: number | null;
+  q1Usd: number | null;
+  q3Usd: number | null;
+  iqrUsd: number | null;
+  deltaUsd: number | null;
+  deltaPercent: number | null;
+  outlier: "low" | "high" | null;
+}
+
+export interface SoldPriceExplorerItem extends LotListItem {
+  soldPrice: SoldPriceRow;
+  stats: SoldPriceStats;
+}
+
+export interface SoldPriceSummary {
+  count: number;
+  medianUsd: number | null;
+  q1Usd: number | null;
+  q3Usd: number | null;
+  minUsd: number | null;
+  maxUsd: number | null;
+  outlierCount: number;
+}
+
+export interface SoldPriceExplorerFilters {
+  model: string;
+  source: string;
+  year: string;
+  minPrice: string;
+  maxPrice: string;
+  q: string;
+  highlightedOnly: boolean;
+  sort: string;
+}
+
+export interface SoldPriceExplorerOptions {
+  models: Array<{ key: string; label: string }>;
+  sources: Array<{ key: string; label: string }>;
+  years: number[];
+}
+
+export interface SoldPriceExplorerData {
+  items: SoldPriceExplorerItem[];
+  summary: SoldPriceSummary;
+  filters: SoldPriceExplorerFilters;
+  options: SoldPriceExplorerOptions;
 }
 
 export interface RunnerManifestFile {

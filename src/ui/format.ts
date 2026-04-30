@@ -135,6 +135,38 @@ export function formatBytes(n: number): string {
   return `${i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
+export function formatUsd(value: number | null | undefined, emptyLabel = "—"): string {
+  if (value == null || !Number.isFinite(value)) {
+    return emptyLabel;
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+export function formatSignedUsd(value: number | null | undefined, emptyLabel = "—"): string {
+  if (value == null || !Number.isFinite(value)) {
+    return emptyLabel;
+  }
+  const absolute = formatUsd(Math.abs(value));
+  if (value === 0) {
+    return absolute;
+  }
+  return `${value > 0 ? "+" : "-"}${absolute}`;
+}
+
+export function formatPercent(value: number | null | undefined, emptyLabel = "—"): string {
+  if (value == null || !Number.isFinite(value)) {
+    return emptyLabel;
+  }
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+    style: "percent",
+  }).format(value);
+}
+
 export function stripTeslaPrefix(carType: string): string {
   return carType.replace(/^Tesla\s+/, "");
 }

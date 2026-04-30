@@ -1,7 +1,7 @@
 {
   "version": "2026.04.06.2",
   "minimumSupportedVersion": "2026.04.06.2",
-  "generatedAt": "2026-04-28T10:40:16.637Z",
+  "generatedAt": "2026-04-30T22:13:02.618Z",
   "baseUrl": "https://raw.githubusercontent.com/lukasa1993/Car-Auction-Homelab/main/collector/release",
   "entrypoint": "auction-runner.js",
   "packageJsonPath": "package.json",
@@ -13,18 +13,23 @@
     },
     {
       "path": "bootstrap.js",
-      "sha256": "d856daebb9255abe5fe5c384d5c29da495e5642a8362f7732842d9c2f6354e99",
-      "byteSize": 19205
+      "sha256": "42d2d4ec69826aeca23310341e7668cf169f29d77e6b64a06c393217a0ff2837",
+      "byteSize": 19618
     },
     {
       "path": "package.json",
-      "sha256": "40961d123decd9e7f54a100c41ef41e8c75b5d18798ae0467468c2b3db9fb9df",
-      "byteSize": 284
+      "sha256": "0e8218c873b582d93bd70dba622ace2367a3179148979f8a89bd9a84f7921d17",
+      "byteSize": 331
     },
     {
       "path": "README.txt",
       "sha256": "8052dbf60c8a258144c577cfefed5a3d00e5387c9fbce39f70c6d8549d43e537",
       "byteSize": 165
+    },
+    {
+      "path": "sold-price-runner.js",
+      "sha256": "aa7123ea3c8fe9c8d6c8ff30e08bff596e211b92bccd14b214bc10852fc9881f",
+      "byteSize": 11475
     }
   ]
 }

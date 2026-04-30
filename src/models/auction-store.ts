@@ -14,6 +14,11 @@ import type {
   LotSnapshotRow,
   RunnerScope,
   ScrapedLotRecord,
+  SoldPriceExplorerItem,
+  SoldPriceQueueItem,
+  SoldPriceResultInput,
+  SoldPriceRow,
+  SoldPriceStats,
   SourceKey,
   TargetMetadataUpdatePayload,
   VinTarget,
@@ -44,6 +49,11 @@ interface RunnerSummary {
 
 interface TargetMetadataUpdateSummary {
   applied: number;
+}
+
+interface SoldPriceResultSummary {
+  accepted: number;
+  skipped: number;
 }
 
 function boolFlag(value: boolean): number {
@@ -85,6 +95,20 @@ function normalizeLotStatus(status: string | null | undefined): LotRow["status"]
 function normalizedTextOrNull(value: string | null | undefined): string | null {
   const normalized = normalizeWhitespace(value);
   return normalized || null;
+}
+
+function parseJsonStringList(value: unknown): string[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.map((item) => normalizeWhitespace(String(item ?? ""))).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function preferredText(next: string | null | undefined, fallback: string | null | undefined): string | null {
@@ -154,6 +178,8 @@ function mapVinTarget(row: Record<string, unknown>): VinTarget {
     yearTo: Number(row.year_to),
     copartSlug: String(row.copart_slug ?? ""),
     iaaiPath: String(row.iaai_path ?? ""),
+    rejectColors: parseJsonStringList(row.reject_colors_json),
+    rejectLocations: parseJsonStringList(row.reject_locations_json),
     enabledCopart: rowBool(row.enabled_copart),
     enabledIaai: rowBool(row.enabled_iaai),
     active: rowBool(row.active),
@@ -243,6 +269,61 @@ function mapLotAction(row: Record<string, unknown>): LotActionRow {
   };
 }
 
+function normalizeSoldPriceLookupStatus(status: string | null | undefined): SoldPriceRow["lookupStatus"] {
+  switch ((status ?? "").toLowerCase()) {
+    case "found":
+      return "found";
+    case "blocked":
+      return "blocked";
+    case "failed":
+      return "failed";
+    default:
+      return "not_found";
+  }
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value == null || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function mapSoldPrice(row: Record<string, unknown>): SoldPriceRow {
+  return {
+    id: String(row.id),
+    lotId: String(row.lot_id),
+    lookupStatus: normalizeSoldPriceLookupStatus(String(row.lookup_status ?? "")),
+    attemptCount: Number(row.attempt_count ?? 0),
+    lastAttemptedAt: row.last_attempted_at ? String(row.last_attempted_at) : null,
+    nextAttemptAt: row.next_attempt_at ? String(row.next_attempt_at) : null,
+    foundAt: row.found_at ? String(row.found_at) : null,
+    bidfaxUrl: row.bidfax_url ? String(row.bidfax_url) : null,
+    matchedQuery: row.matched_query ? String(row.matched_query) : null,
+    matchConfidence: nullableNumber(row.match_confidence),
+    finalBidUsd: nullableNumber(row.final_bid_usd),
+    saleDate: row.sale_date ? String(row.sale_date) : null,
+    saleDateRaw: row.sale_date_raw ? String(row.sale_date_raw) : null,
+    externalSourceKey: row.external_source_key ? String(row.external_source_key) as SourceKey : null,
+    externalSourceLabel: row.external_source_label ? String(row.external_source_label) : null,
+    externalLotNumber: row.external_lot_number ? String(row.external_lot_number) : null,
+    externalVin: row.external_vin ? String(row.external_vin) : null,
+    condition: row.condition ? String(row.condition) : null,
+    damage: row.damage ? String(row.damage) : null,
+    secondaryDamage: row.secondary_damage ? String(row.secondary_damage) : null,
+    mileage: row.mileage ? String(row.mileage) : null,
+    location: row.location ? String(row.location) : null,
+    color: row.color ? String(row.color) : null,
+    seller: row.seller ? String(row.seller) : null,
+    documents: row.documents ? String(row.documents) : null,
+    rawJson: row.raw_json ? String(row.raw_json) : null,
+    errorText: row.error_text ? String(row.error_text) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
 function lotListSortValue(row: LotRow): number {
   if (row.status === "done") {
     return 9_999_999_999_999;
@@ -252,6 +333,101 @@ function lotListSortValue(row: LotRow): number {
   }
   const milliseconds = Date.parse(row.auctionDate);
   return Number.isNaN(milliseconds) ? 9_999_999_999_997 : milliseconds;
+}
+
+function isExactPastAuction(lot: LotRow, nowMs: number): boolean {
+  if (!lot.auctionDate || !lot.auctionDate.includes("T")) {
+    return false;
+  }
+  const auctionMs = Date.parse(lot.auctionDate);
+  return Number.isFinite(auctionMs) && auctionMs <= nowMs - 2 * 60 * 60 * 1000;
+}
+
+function getNextSoldPriceAttemptAt(status: SoldPriceRow["lookupStatus"], attemptCount: number, nowIso: string): string | null {
+  if (status === "found") {
+    return null;
+  }
+  const exponent = Math.max(0, Math.min(8, attemptCount - 1));
+  const hours = status === "not_found"
+    ? Math.min(72, 6 * (2 ** exponent))
+    : Math.min(24, 2 ** exponent);
+  return new Date(Date.parse(nowIso) + hours * 60 * 60 * 1000).toISOString();
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[middle];
+  }
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function quartiles(values: number[]): Pick<SoldPriceStats, "medianUsd" | "q1Usd" | "q3Usd" | "iqrUsd"> {
+  const sorted = [...values].sort((left, right) => left - right);
+  const medianUsd = median(sorted);
+  if (!sorted.length) {
+    return { medianUsd: null, q1Usd: null, q3Usd: null, iqrUsd: null };
+  }
+
+  const middle = Math.floor(sorted.length / 2);
+  const lower = sorted.length % 2 === 0 ? sorted.slice(0, middle) : sorted.slice(0, middle);
+  const upper = sorted.length % 2 === 0 ? sorted.slice(middle) : sorted.slice(middle + 1);
+  const q1Usd = median(lower.length ? lower : sorted);
+  const q3Usd = median(upper.length ? upper : sorted);
+  return {
+    medianUsd,
+    q1Usd,
+    q3Usd,
+    iqrUsd: q1Usd == null || q3Usd == null ? null : q3Usd - q1Usd,
+  };
+}
+
+function buildSoldPriceStats(items: Array<LotListItem & { soldPrice: SoldPriceRow }>): SoldPriceExplorerItem[] {
+  const groups = new Map<string, Array<LotListItem & { soldPrice: SoldPriceRow }>>();
+  for (const item of items) {
+    const groupModel = item.targetKey || item.carType;
+    const groupYear = item.modelYear == null ? "unknown" : String(item.modelYear);
+    const groupKey = `${item.sourceKey}:${groupModel}:${groupYear}`;
+    const group = groups.get(groupKey) ?? [];
+    group.push(item);
+    groups.set(groupKey, group);
+  }
+
+  return items.map((item) => {
+    const groupModel = item.targetKey || item.carType;
+    const groupYear = item.modelYear == null ? "unknown" : String(item.modelYear);
+    const groupKey = `${item.sourceKey}:${groupModel}:${groupYear}`;
+    const group = groups.get(groupKey) ?? [];
+    const values = group
+      .map((groupItem) => groupItem.soldPrice.finalBidUsd)
+      .filter((value): value is number => value != null && Number.isFinite(value));
+    const stats = quartiles(values);
+    const price = item.soldPrice.finalBidUsd;
+    const deltaUsd = price == null || stats.medianUsd == null ? null : price - stats.medianUsd;
+    const deltaPercent = deltaUsd == null || !stats.medianUsd ? null : deltaUsd / stats.medianUsd;
+    let outlier: SoldPriceStats["outlier"] = null;
+    if (values.length >= 5 && price != null && stats.q1Usd != null && stats.q3Usd != null && stats.iqrUsd != null) {
+      const lowFence = stats.q1Usd - 1.5 * stats.iqrUsd;
+      const highFence = stats.q3Usd + 1.5 * stats.iqrUsd;
+      outlier = price < lowFence ? "low" : price > highFence ? "high" : null;
+    }
+    return {
+      ...item,
+      stats: {
+        groupKey,
+        groupLabel: [item.sourceLabel, item.carType, item.modelYear ? String(item.modelYear) : null].filter(Boolean).join(" · "),
+        groupCount: values.length,
+        ...stats,
+        deltaUsd,
+        deltaPercent,
+        outlier,
+      },
+    };
+  });
 }
 
 export class AuctionStore {
@@ -397,11 +573,45 @@ export class AuctionStore {
         PRIMARY KEY (lot_id, event_type)
       );
 
+      CREATE TABLE IF NOT EXISTS lot_sold_prices (
+        id TEXT PRIMARY KEY,
+        lot_id TEXT NOT NULL UNIQUE REFERENCES lots(id) ON DELETE CASCADE,
+        lookup_status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_attempted_at TEXT,
+        next_attempt_at TEXT,
+        found_at TEXT,
+        bidfax_url TEXT,
+        matched_query TEXT,
+        match_confidence REAL,
+        final_bid_usd INTEGER,
+        sale_date TEXT,
+        sale_date_raw TEXT,
+        external_source_key TEXT,
+        external_source_label TEXT,
+        external_lot_number TEXT,
+        external_vin TEXT,
+        condition TEXT,
+        damage TEXT,
+        secondary_damage TEXT,
+        mileage TEXT,
+        location TEXT,
+        color TEXT,
+        seller TEXT,
+        documents TEXT,
+        raw_json TEXT,
+        error_text TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_lots_source_target ON lots(source_key, target_key);
       CREATE INDEX IF NOT EXISTS idx_lots_workflow ON lots(workflow_state);
       CREATE INDEX IF NOT EXISTS idx_lot_images_lot_id ON lot_images(lot_id);
       CREATE INDEX IF NOT EXISTS idx_snapshots_lot_id ON lot_snapshots(lot_id);
       CREATE INDEX IF NOT EXISTS idx_actions_lot_id ON lot_actions(lot_id);
+      CREATE INDEX IF NOT EXISTS idx_sold_prices_status_due ON lot_sold_prices(lookup_status, next_attempt_at);
+      CREATE INDEX IF NOT EXISTS idx_sold_prices_final_bid ON lot_sold_prices(final_bid_usd);
     `);
 
     const lotColumns = new Set(
@@ -751,7 +961,10 @@ export class AuctionStore {
       .query("SELECT * FROM lot_actions WHERE lot_id = ? ORDER BY created_at DESC")
       .all(lot.id) as Record<string, unknown>[])
       .map(mapLotAction);
-    return { lot, images, snapshots, actions };
+    const soldPriceRow = this.db
+      .query("SELECT * FROM lot_sold_prices WHERE lot_id = ? LIMIT 1")
+      .get(lot.id) as Record<string, unknown> | null;
+    return { lot, images, snapshots, actions, soldPrice: soldPriceRow ? mapSoldPrice(soldPriceRow) : null };
   }
 
   getImageRow(imageId: string): LotImageRow | null {
@@ -815,6 +1028,215 @@ export class AuctionStore {
       this.removeStoredImageFile(row.storage_path);
     }
     return true;
+  }
+
+  getSoldPriceQueue(limit = 20): SoldPriceQueueItem[] {
+    const nowIso = new Date().toISOString();
+    const nowMs = Date.parse(nowIso);
+    const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const soldPriceRows = (this.db.query("SELECT * FROM lot_sold_prices").all() as Record<string, unknown>[])
+      .map(mapSoldPrice);
+    const soldPriceByLotId = new Map(soldPriceRows.map((row) => [row.lotId, row]));
+
+    return this.getPublicLotList()
+      .filter((lot) => {
+        if (lot.workflowState === "removed") {
+          return false;
+        }
+        if (!lot.vin && !lot.lotNumber) {
+          return false;
+        }
+        if (lot.status !== "done" && !isExactPastAuction(lot, nowMs)) {
+          return false;
+        }
+        const soldPrice = soldPriceByLotId.get(lot.id);
+        if (!soldPrice) {
+          return true;
+        }
+        if (soldPrice.lookupStatus === "found") {
+          return false;
+        }
+        if (!soldPrice.nextAttemptAt) {
+          return true;
+        }
+        return Date.parse(soldPrice.nextAttemptAt) <= nowMs;
+      })
+      .sort((left, right) => {
+        const leftSoldPrice = soldPriceByLotId.get(left.id);
+        const rightSoldPrice = soldPriceByLotId.get(right.id);
+        const leftAttemptMs = leftSoldPrice?.lastAttemptedAt ? Date.parse(leftSoldPrice.lastAttemptedAt) : 0;
+        const rightAttemptMs = rightSoldPrice?.lastAttemptedAt ? Date.parse(rightSoldPrice.lastAttemptedAt) : 0;
+        const leftAuctionMs = left.auctionDate ? Date.parse(left.auctionDate) : Number.MAX_SAFE_INTEGER;
+        const rightAuctionMs = right.auctionDate ? Date.parse(right.auctionDate) : Number.MAX_SAFE_INTEGER;
+        return leftAttemptMs - rightAttemptMs || leftAuctionMs - rightAuctionMs || left.lotNumber.localeCompare(right.lotNumber);
+      })
+      .slice(0, boundedLimit)
+      .map((lot) => ({
+        lotId: lot.id,
+        sourceKey: lot.sourceKey,
+        sourceLabel: lot.sourceLabel,
+        targetKey: lot.targetKey,
+        lotNumber: lot.lotNumber,
+        vin: lot.vin,
+        modelYear: lot.modelYear,
+        carType: lot.carType,
+        marker: lot.marker,
+        auctionDate: lot.auctionDate,
+        status: lot.status,
+        url: lot.url,
+      }));
+  }
+
+  recordSoldPriceResults(results: SoldPriceResultInput[]): SoldPriceResultSummary {
+    let accepted = 0;
+    let skipped = 0;
+
+    this.db.transaction(() => {
+      for (const result of results) {
+        if (this.recordSoldPriceResult(result)) {
+          accepted += 1;
+        } else {
+          skipped += 1;
+        }
+      }
+    })();
+
+    return { accepted, skipped };
+  }
+
+  private recordSoldPriceResult(input: SoldPriceResultInput): boolean {
+    const lotRow = this.db.query("SELECT id FROM lots WHERE id = ? LIMIT 1").get(input.lotId) as Record<string, unknown> | null;
+    if (!lotRow) {
+      return false;
+    }
+
+    const existingRow = this.db
+      .query("SELECT * FROM lot_sold_prices WHERE lot_id = ? LIMIT 1")
+      .get(input.lotId) as Record<string, unknown> | null;
+    const existing = existingRow ? mapSoldPrice(existingRow) : null;
+    const now = new Date().toISOString();
+    const nextAttemptCount = (existing?.attemptCount ?? 0) + 1;
+    const requestedStatus = normalizeSoldPriceLookupStatus(input.lookupStatus);
+    const finalBidUsd = input.finalBidUsd == null ? null : Math.round(Number(input.finalBidUsd));
+    const lookupStatus = requestedStatus === "found" && (!finalBidUsd || finalBidUsd <= 0) ? "failed" : requestedStatus;
+    const nextAttemptAt = getNextSoldPriceAttemptAt(lookupStatus, nextAttemptCount, now);
+    const errorText = normalizedTextOrNull(input.errorText);
+
+    if (existing?.lookupStatus === "found" && lookupStatus !== "found") {
+      this.db.query(`
+        UPDATE lot_sold_prices
+        SET attempt_count = ?, last_attempted_at = ?, error_text = COALESCE(?, error_text), updated_at = ?
+        WHERE lot_id = ?
+      `).run(nextAttemptCount, now, errorText, now, input.lotId);
+      return true;
+    }
+
+    const externalSourceKey =
+      input.externalSourceKey === "copart" || input.externalSourceKey === "iaai"
+        ? input.externalSourceKey
+        : null;
+    const matchConfidence =
+      input.matchConfidence == null
+        ? null
+        : Math.max(0, Math.min(1, Number(input.matchConfidence)));
+    const rawJson = serializeJsonOrNull(input.raw);
+    const id = existing?.id ?? randomUUID();
+    const createdAt = existing?.createdAt ?? now;
+    const foundAt = lookupStatus === "found" ? (existing?.foundAt ?? now) : null;
+
+    this.db.query(`
+      INSERT INTO lot_sold_prices (
+        id, lot_id, lookup_status, attempt_count, last_attempted_at, next_attempt_at, found_at,
+        bidfax_url, matched_query, match_confidence, final_bid_usd, sale_date, sale_date_raw,
+        external_source_key, external_source_label, external_lot_number, external_vin,
+        condition, damage, secondary_damage, mileage, location, color, seller, documents,
+        raw_json, error_text, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(lot_id) DO UPDATE SET
+        lookup_status = excluded.lookup_status,
+        attempt_count = excluded.attempt_count,
+        last_attempted_at = excluded.last_attempted_at,
+        next_attempt_at = excluded.next_attempt_at,
+        found_at = excluded.found_at,
+        bidfax_url = excluded.bidfax_url,
+        matched_query = excluded.matched_query,
+        match_confidence = excluded.match_confidence,
+        final_bid_usd = excluded.final_bid_usd,
+        sale_date = excluded.sale_date,
+        sale_date_raw = excluded.sale_date_raw,
+        external_source_key = excluded.external_source_key,
+        external_source_label = excluded.external_source_label,
+        external_lot_number = excluded.external_lot_number,
+        external_vin = excluded.external_vin,
+        condition = excluded.condition,
+        damage = excluded.damage,
+        secondary_damage = excluded.secondary_damage,
+        mileage = excluded.mileage,
+        location = excluded.location,
+        color = excluded.color,
+        seller = excluded.seller,
+        documents = excluded.documents,
+        raw_json = excluded.raw_json,
+        error_text = excluded.error_text,
+        updated_at = excluded.updated_at
+    `).run(
+      id,
+      input.lotId,
+      lookupStatus,
+      nextAttemptCount,
+      now,
+      nextAttemptAt,
+      foundAt,
+      normalizedTextOrNull(input.bidfaxUrl),
+      normalizedTextOrNull(input.matchedQuery),
+      matchConfidence,
+      lookupStatus === "found" ? finalBidUsd : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.saleDate) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.saleDateRaw) : null,
+      lookupStatus === "found" ? externalSourceKey : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.externalSourceLabel) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.externalLotNumber) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.externalVin) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.condition) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.damage) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.secondaryDamage) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.mileage) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.location) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.color) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.seller) : null,
+      lookupStatus === "found" ? normalizedTextOrNull(input.documents) : null,
+      rawJson,
+      errorText,
+      createdAt,
+      now,
+    );
+
+    return true;
+  }
+
+  getSoldPriceExplorerItems(): SoldPriceExplorerItem[] {
+    const publicLots = this.getPublicLotList();
+    const publicLotsById = new Map(publicLots.map((lot) => [lot.id, lot]));
+    const soldRows = (this.db.query(`
+      SELECT *
+      FROM lot_sold_prices
+      WHERE lookup_status = 'found' AND final_bid_usd IS NOT NULL
+    `).all() as Record<string, unknown>[])
+      .map(mapSoldPrice);
+
+    const items = soldRows
+      .map((soldPrice) => {
+        const lot = publicLotsById.get(soldPrice.lotId);
+        return lot ? { ...lot, soldPrice } : null;
+      })
+      .filter((item): item is LotListItem & { soldPrice: SoldPriceRow } => item !== null)
+      .sort((left, right) => {
+        const rightSaleMs = Date.parse(right.soldPrice.saleDate || right.soldPrice.foundAt || right.updatedAt);
+        const leftSaleMs = Date.parse(left.soldPrice.saleDate || left.soldPrice.foundAt || left.updatedAt);
+        return rightSaleMs - leftSaleMs || right.soldPrice.finalBidUsd! - left.soldPrice.finalBidUsd!;
+      });
+
+    return buildSoldPriceStats(items);
   }
 
   applyTargetMetadataUpdates(payload: TargetMetadataUpdatePayload): TargetMetadataUpdateSummary {

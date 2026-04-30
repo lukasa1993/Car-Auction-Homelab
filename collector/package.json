@@ -9,6 +9,8 @@
     "bootstrap:src": "bun run bootstrap.ts",
     "collect": "bun run build && bun ./dist/auction-runner.js",
     "collect:src": "bun run auction-runner.ts",
+    "sold-prices": "bun run build && bun ./dist/sold-price-runner.js",
+    "sold-prices:src": "bun run sold-price-runner.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

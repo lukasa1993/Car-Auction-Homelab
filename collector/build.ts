@@ -28,6 +28,13 @@ const runnerBuild = await Bun.build({
   ...sharedOptions,
 });
 
+const soldPriceBuild = await Bun.build({
+  entrypoints: [path.join(collectorDir, "sold-price-runner.ts")],
+  outdir: distDir,
+  naming: "sold-price-runner.js",
+  ...sharedOptions,
+});
+
 const bootstrapBuild = await Bun.build({
   entrypoints: [path.join(collectorDir, "bootstrap.ts")],
   outdir: distDir,
@@ -35,8 +42,8 @@ const bootstrapBuild = await Bun.build({
   ...sharedOptions,
 });
 
-const logs = [...runnerBuild.logs, ...bootstrapBuild.logs];
-if (!runnerBuild.success || !bootstrapBuild.success) {
+const logs = [...runnerBuild.logs, ...soldPriceBuild.logs, ...bootstrapBuild.logs];
+if (!runnerBuild.success || !soldPriceBuild.success || !bootstrapBuild.success) {
   for (const log of logs) {
     console.error(log);
   }
@@ -54,6 +61,7 @@ writeFileSync(
       scripts: {
         bootstrap: "bun bootstrap.js",
         collect: "bun auction-runner.js",
+        "sold-prices": "bun sold-price-runner.js",
       },
       dependencies: {
         luxon: sourcePackage.dependencies?.luxon,
@@ -83,7 +91,7 @@ console.log(
       ok: true,
       distDir,
       version: sourcePackage.version || "0.1.0",
-      files: ["auction-runner.js", "bootstrap.js", "package.json", "README.txt"],
+      files: ["auction-runner.js", "sold-price-runner.js", "bootstrap.js", "package.json", "README.txt"],
     },
     null,
     2,

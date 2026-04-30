@@ -12,6 +12,7 @@
     "dev": "bun run styles:build && bun --watch src/server.tsx",
     "start": "bun src/server.tsx",
     "collector:headed": "bash ./scripts/run-headed-collector.sh",
+    "sold-prices:headed": "bash ./scripts/run-sold-price-runner.sh",
     "collector:bootstrap": "bun collector/bootstrap.ts --public-key-file ./runner-keys/collector-signing-key.pub.pem",
     "collector:local": "bun collector/auction-runner.ts",
     "check:server": "bun src/server.tsx"

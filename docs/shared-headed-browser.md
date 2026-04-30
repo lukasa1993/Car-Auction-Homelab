@@ -50,4 +50,10 @@ Recommended scheduler invocation:
 cd /path/to/Car-Auction-Homelab && /usr/bin/env bash scripts/run-headed-collector.sh --site copart,iaai
 ```
 
+Recommended sold-price invocation after a successful collector run:
+
+```bash
+cd /path/to/Car-Auction-Homelab && /usr/bin/env bash scripts/run-sold-price-runner.sh --limit 20
+```
+
 That wrapper stays quiet on success, so your scheduler only surfaces real failures or manual-gate timeouts.
