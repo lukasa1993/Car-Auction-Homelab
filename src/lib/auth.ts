@@ -1,8 +1,12 @@
 import "@tanstack/react-start/server-only";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin as adminPlugin } from "better-auth/plugins";
 import { db } from "@/lib/db";
 import { getSecrets } from "@/utils/env";
+
+const ADMIN_ROLE = "admin";
+const DEFAULT_ROLE = "user";
 
 function getBaseUrl(): string {
   return getSecrets().BETTER_AUTH_URL.replace(/\/$/, "");
@@ -52,6 +56,20 @@ export const auth = betterAuth({
     maxPasswordLength: 128,
   },
   trustedOrigins: getTrustedOrigins(),
+  plugins: [adminPlugin({ defaultRole: DEFAULT_ROLE, adminRoles: [ADMIN_ROLE] })],
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (data) => {
+          const email = typeof data.email === "string" ? data.email : "";
+          if (isAdminEmail(email)) {
+            return { data: { ...data, role: ADMIN_ROLE } };
+          }
+          return { data };
+        },
+      },
+    },
+  },
   advanced: {
     database: {
       generateId: () => crypto.randomUUID(),
@@ -100,16 +118,22 @@ export async function getAuthState(request: Request): Promise<{
   signedIn: boolean;
   admin: boolean;
   email: string | null;
-  session: { session: Record<string, unknown>; user: { email: string } } | null;
+  session: {
+    session: Record<string, unknown>;
+    user: { email: string; role?: string | null };
+  } | null;
 }> {
   const session = (await auth.api.getSession({ headers: request.headers }).catch(() => null)) as {
     session: Record<string, unknown>;
-    user: { email: string };
+    user: { email: string; role?: string | null };
   } | null;
   const email = session?.user?.email ?? null;
+  const hasAdminRole = session?.user?.role === ADMIN_ROLE;
   return {
     signedIn: Boolean(session?.session),
-    admin: isAdminEmail(email),
+    // Admin if the role is set, OR (legacy fallback) the email is in the allowlist
+    // for users who existed before the admin plugin was introduced.
+    admin: hasAdminRole || isAdminEmail(email),
     email,
     session,
   };
