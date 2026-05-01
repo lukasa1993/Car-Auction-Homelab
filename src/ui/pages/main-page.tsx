@@ -253,10 +253,12 @@ function CopyLotButton({ lot }: { lot: LotListItem }) {
 }
 
 function LotRowActions({
+  admin,
   lot,
   onRejected,
   redirectTo,
 }: {
+  admin: boolean;
   lot: LotListItem;
   onRejected: (lotId: string) => void;
   redirectTo: string;
@@ -278,7 +280,7 @@ function LotRowActions({
         </Button>
       </a>
       <CopyLotButton lot={lot} />
-      <RejectListingButton lot={lot} onRejected={onRejected} redirectTo={redirectTo} />
+      {admin ? <RejectListingButton lot={lot} onRejected={onRejected} redirectTo={redirectTo} /> : null}
     </div>
   );
 }
@@ -289,6 +291,7 @@ export function MainPage({
   lastCollectorIngestAt,
   activeTab,
   tabs,
+  auth,
 }: MainPageProps) {
   const [allLotsState, setAllLotsState] = React.useState(allLots);
   const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
@@ -351,7 +354,7 @@ export function MainPage({
                       <TableCell className="col-start-2 row-start-2 p-0 sm:p-3"><LotModelCell lot={lot} /></TableCell>
                       <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
                       <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
-                        <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
+                        <LotRowActions admin={auth.admin} lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -420,7 +423,7 @@ export function MainPage({
                     <TableCell className="col-start-2 row-start-2 p-0 sm:p-3"><LotModelCell lot={lot} /></TableCell>
                     <TableCell className="col-start-2 row-start-3 p-0 sm:p-3"><LotSourceCell lot={lot} /></TableCell>
                     <TableCell className="col-span-2 row-start-4 p-0 pt-3 text-right sm:col-span-1 sm:row-start-auto sm:p-3 sm:pt-3">
-                      <LotRowActions lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
+                      <LotRowActions admin={auth.admin} lot={lot} onRejected={handleRejected} redirectTo={redirectTo} />
                     </TableCell>
                   </TableRow>
                 ))}

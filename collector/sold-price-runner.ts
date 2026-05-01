@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 
 import {
   BIDCARS_BASE_URL,
@@ -70,6 +70,11 @@ interface RunnerArgs {
   machineName: string;
 }
 
+interface LaunchedBrowserContext {
+  context: BrowserContext;
+  close: () => Promise<void>;
+}
+
 const packageJson = JSON.parse(await Bun.file(new URL("./package.json", import.meta.url)).text()) as { version?: string };
 const RUNNER_VERSION = String(packageJson.version || "0.1.0");
 const REQUIRED_DISPLAY = process.env.AUCTION_REQUIRED_DISPLAY || ":99";
@@ -79,6 +84,9 @@ const QUERY_DELAY_MS = 2500;
 const SHARED_HEADED_BROWSER_PRIMARY_URL = process.env.AUCTION_HEADED_BROWSER_URL || "";
 const SHARED_HEADED_BROWSER_FALLBACK_URL = process.env.AUCTION_HEADED_BROWSER_FALLBACK_URL || "";
 const SHARED_HEADED_BROWSER_PASSWORD = process.env.AUCTION_HEADED_BROWSER_PASSWORD || "";
+const REMOTE_PLAYWRIGHT_CDP_URL = process.env.AUCTION_PLAYWRIGHT_CDP_URL || process.env.PLAYWRIGHT_CDP_URL || "";
+const REMOTE_PLAYWRIGHT_WS_ENDPOINT =
+  process.env.AUCTION_PLAYWRIGHT_WS_ENDPOINT || process.env.PLAYWRIGHT_WS_ENDPOINT || "";
 
 function parseArgs(argv: string[]): RunnerArgs {
   const baseUrlIndex = argv.indexOf("--base-url");
@@ -231,7 +239,43 @@ async function postResults(baseUrl: string, token: string, results: SoldPriceRes
   });
 }
 
-async function launchBidcarsContext(): Promise<BrowserContext> {
+async function connectRemoteBidcarsContext(): Promise<LaunchedBrowserContext | null> {
+  const label = REMOTE_PLAYWRIGHT_CDP_URL
+    ? "CDP"
+    : REMOTE_PLAYWRIGHT_WS_ENDPOINT
+      ? "Playwright WS"
+      : "";
+  const endpoint = REMOTE_PLAYWRIGHT_CDP_URL || REMOTE_PLAYWRIGHT_WS_ENDPOINT;
+  if (!endpoint) {
+    return null;
+  }
+
+  const browser = REMOTE_PLAYWRIGHT_CDP_URL
+    ? await chromium.connectOverCDP(endpoint)
+    : await chromium.connect(endpoint);
+  const contextOptions: NonNullable<Parameters<Browser["newContext"]>[0]> = {
+    viewport: null,
+    ignoreHTTPSErrors: true,
+  };
+  const existingContext = browser.contexts()[0] ?? null;
+  const context = existingContext || await browser.newContext(contextOptions);
+  console.log(`Connected sold-price runner to remote headed browser via ${label} endpoint.`);
+  return {
+    context,
+    close: async () => {
+      if (!existingContext) {
+        await context.close().catch(() => {});
+      }
+    },
+  };
+}
+
+async function launchBidcarsContext(): Promise<LaunchedBrowserContext> {
+  const remoteContext = await connectRemoteBidcarsContext();
+  if (remoteContext) {
+    return remoteContext;
+  }
+
   if (process.env.DISPLAY !== REQUIRED_DISPLAY) {
     throw new Error(
       `Sold-price runner must run headed on DISPLAY=${REQUIRED_DISPLAY}. Current DISPLAY=${process.env.DISPLAY || "<unset>"}. ${buildSharedHeadedBrowserHelp()}`,
@@ -239,12 +283,18 @@ async function launchBidcarsContext(): Promise<BrowserContext> {
   }
   const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", "playwright-profile-bidcars");
   await mkdir(profileDir, { recursive: true });
-  return await chromium.launchPersistentContext(profileDir, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless: false,
     viewport: null,
     ignoreHTTPSErrors: true,
     args: ["--disable-blink-features=AutomationControlled"],
   });
+  return {
+    context,
+    close: async () => {
+      await context.close().catch(() => {});
+    },
+  };
 }
 
 async function readBidcarsPageState(page: Page): Promise<{ blocked: boolean; ready: boolean; notFound: boolean; title: string; bodyPreview: string; html: string }> {
@@ -414,10 +464,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const context = await launchBidcarsContext();
+  const browserContext = await launchBidcarsContext();
   const results: SoldPriceResultInput[] = [];
   try {
-    const page = context.pages()[0] || await context.newPage();
+    const page = browserContext.context.pages()[0] || await browserContext.context.newPage();
     for (const item of queue) {
       const result = await lookupSoldPrice(page, item);
       results.push(result);
@@ -433,7 +483,7 @@ async function main(): Promise<void> {
       await delay(QUERY_DELAY_MS);
     }
   } finally {
-    await context.close().catch(() => {});
+    await browserContext.close().catch(() => {});
   }
 
   const found = results.filter((result) => result.lookupStatus === "found").length;

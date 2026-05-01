@@ -208,7 +208,7 @@ export function LotDetailPage({ detail, auth }: LotDetailPageProps) {
                 <ExternalLink className="size-3.5" />
               </Button>
             </a>
-            {lot.workflowState !== "removed" ? (
+            {auth.admin && lot.workflowState !== "removed" ? (
               <form action={`/lots/${lot.id}/reject`} method="post">
                 <input name="redirect" type="hidden" value="/" />
                 <Button size="sm" type="submit" variant="outline">

@@ -4,8 +4,6 @@ import type {
   LotDetail,
   SoldPriceExplorerData,
   SoldPriceExplorerFilters,
-  SoldPriceExplorerItem,
-  SoldPriceSummary,
   VinTarget,
 } from "@/lib/types";
 
@@ -41,34 +39,6 @@ function resolveTab(raw: string | null | undefined, availableTabs: Array<{ key: 
     return "all";
   }
   return availableTabs.some((tab) => tab.key === raw) ? String(raw) : "all";
-}
-
-function summarizeSoldItems(items: SoldPriceExplorerItem[]): SoldPriceSummary {
-  const values = items
-    .map((item) => item.soldPrice.finalBidUsd)
-    .filter((value): value is number => value != null && Number.isFinite(value))
-    .sort((left, right) => left - right);
-  const medianValue = median(values);
-  const middle = Math.floor(values.length / 2);
-  const lower = values.length % 2 === 0 ? values.slice(0, middle) : values.slice(0, middle);
-  const upper = values.length % 2 === 0 ? values.slice(middle) : values.slice(middle + 1);
-  return {
-    count: items.length,
-    medianUsd: medianValue,
-    q1Usd: median(lower.length ? lower : values),
-    q3Usd: median(upper.length ? upper : values),
-    minUsd: values[0] ?? null,
-    maxUsd: values[values.length - 1] ?? null,
-    outlierCount: items.filter((item) => item.stats.outlier).length,
-  };
-}
-
-function median(values: number[]): number | null {
-  if (!values.length) {
-    return null;
-  }
-  const middle = Math.floor(values.length / 2);
-  return values.length % 2 === 1 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
 }
 
 function normalizeSearchText(value: string): string {
@@ -150,7 +120,6 @@ async function buildSoldExplorerData(
 
   return {
     items: filtered,
-    summary: summarizeSoldItems(filtered),
     filters,
     options: {
       models: [...modelMap.entries()]
@@ -284,7 +253,9 @@ export type LotDetailPageData = {
 };
 
 export const getLoginPageData = createServerFn()
-  .inputValidator((data: { error?: string | null; message?: string | null } | undefined) => data ?? {})
+  .inputValidator(
+    (data: { error?: string | null; message?: string | null } | undefined) => data ?? {},
+  )
   .handler(async ({ data }) => {
     const request = getRequest();
     const { ensureBootstrapAdminUser, getAuthState } = await import("@/lib/auth");

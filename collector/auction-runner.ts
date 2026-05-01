@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { DateTime } from "luxon";
 
 import {
@@ -138,6 +138,11 @@ interface RunnerArgs {
   machineName: string;
 }
 
+interface LaunchedBrowserContext {
+  context: BrowserContext;
+  close: () => Promise<void>;
+}
+
 const packageJson = JSON.parse(await Bun.file(new URL("./package.json", import.meta.url)).text()) as { version?: string };
 const RUNNER_VERSION = String(packageJson.version || "0.1.0");
 const DEFAULT_HTTP_USER_AGENT =
@@ -156,6 +161,9 @@ const DEFAULT_MANUAL_GATE_POLL_MS = 3000;
 const SHARED_HEADED_BROWSER_PRIMARY_URL = process.env.AUCTION_HEADED_BROWSER_URL || "";
 const SHARED_HEADED_BROWSER_FALLBACK_URL = process.env.AUCTION_HEADED_BROWSER_FALLBACK_URL || "";
 const SHARED_HEADED_BROWSER_PASSWORD = process.env.AUCTION_HEADED_BROWSER_PASSWORD || "";
+const REMOTE_PLAYWRIGHT_CDP_URL = process.env.AUCTION_PLAYWRIGHT_CDP_URL || process.env.PLAYWRIGHT_CDP_URL || "";
+const REMOTE_PLAYWRIGHT_WS_ENDPOINT =
+  process.env.AUCTION_PLAYWRIGHT_WS_ENDPOINT || process.env.PLAYWRIGHT_WS_ENDPOINT || "";
 
 const HTML_ENTITY_MAP: Record<string, string> = {
   amp: "&",
@@ -1392,7 +1400,46 @@ async function fetchIaaiDirectMatches(
   return { records, coverage };
 }
 
-async function launchAuctionContext(headless: boolean, profileKey: SourceKey): Promise<BrowserContext> {
+async function connectRemoteAuctionContext(
+  headless: boolean,
+  profileKey: SourceKey,
+): Promise<LaunchedBrowserContext | null> {
+  const label = REMOTE_PLAYWRIGHT_CDP_URL
+    ? "CDP"
+    : REMOTE_PLAYWRIGHT_WS_ENDPOINT
+      ? "Playwright WS"
+      : "";
+  const endpoint = REMOTE_PLAYWRIGHT_CDP_URL || REMOTE_PLAYWRIGHT_WS_ENDPOINT;
+  if (!endpoint) {
+    return null;
+  }
+
+  const browser = REMOTE_PLAYWRIGHT_CDP_URL
+    ? await chromium.connectOverCDP(endpoint)
+    : await chromium.connect(endpoint);
+  const contextOptions: NonNullable<Parameters<Browser["newContext"]>[0]> = {
+    viewport: headless ? { width: 1600, height: 1100 } : null,
+    ignoreHTTPSErrors: true,
+  };
+  const existingContext = browser.contexts()[0] ?? null;
+  const context = existingContext || await browser.newContext(contextOptions);
+  console.log(`Connected ${profileKey} collector to remote headed browser via ${label} endpoint.`);
+  return {
+    context,
+    close: async () => {
+      if (!existingContext) {
+        await context.close().catch(() => {});
+      }
+    },
+  };
+}
+
+async function launchAuctionContext(headless: boolean, profileKey: SourceKey): Promise<LaunchedBrowserContext> {
+  const remoteContext = await connectRemoteAuctionContext(headless, profileKey);
+  if (remoteContext) {
+    return remoteContext;
+  }
+
   if (!headless && process.env.DISPLAY !== REQUIRED_DISPLAY) {
     throw new Error(
       `Collector must run headed on DISPLAY=${REQUIRED_DISPLAY}. Current DISPLAY=${process.env.DISPLAY || "<unset>"}. ${buildSharedHeadedBrowserHelp()}`,
@@ -1400,12 +1447,18 @@ async function launchAuctionContext(headless: boolean, profileKey: SourceKey): P
   }
   const profileDir = path.join(os.homedir(), ".cache", "lnh-auction-collector", `playwright-profile-${profileKey}`);
   await mkdir(profileDir, { recursive: true });
-  return await chromium.launchPersistentContext(profileDir, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless,
     viewport: headless ? { width: 1600, height: 1100 } : null,
     ignoreHTTPSErrors: true,
     args: ["--disable-blink-features=AutomationControlled"],
   });
+  return {
+    context,
+    close: async () => {
+      await context.close().catch(() => {});
+    },
+  };
 }
 
 async function dismissBanners(page: Page): Promise<void> {
@@ -2730,7 +2783,7 @@ async function main(): Promise<void> {
   const allObservations: TargetMetadataObservation[] = [];
   let fastTargetMetadataPosted = false;
 
-  const sourceContexts: Partial<Record<SourceKey, BrowserContext>> = {};
+  const sourceContexts: Partial<Record<SourceKey, LaunchedBrowserContext>> = {};
   try {
     if (args.siteKeys.includes("copart")) {
       sourceContexts.copart = await launchAuctionContext(args.headless, "copart");
@@ -2739,7 +2792,7 @@ async function main(): Promise<void> {
       sourceContexts.iaai = await launchAuctionContext(args.headless, "iaai");
     }
     if (sourceContexts.copart) {
-      const page = sourceContexts.copart.pages()[0] || await sourceContexts.copart.newPage();
+      const page = sourceContexts.copart.context.pages()[0] || await sourceContexts.copart.context.newPage();
       const copartRecords = await scrapeCopartTargets(page, activeTargets, nowIso, scopes, allObservations);
       allRecords.push(...copartRecords);
     }
@@ -2760,7 +2813,7 @@ async function main(): Promise<void> {
     const iaaiTargets = applyTargetUpdates(activeTargets, copartTargetUpdates);
 
     if (sourceContexts.iaai) {
-      const iaaiPage = sourceContexts.iaai.pages()[0] || await sourceContexts.iaai.newPage();
+      const iaaiPage = sourceContexts.iaai.context.pages()[0] || await sourceContexts.iaai.context.newPage();
       const iaaiRecords = await scrapeIaaiTargets(iaaiPage, iaaiTargets, nowIso, scopes, allObservations);
       allRecords.push(...iaaiRecords);
     }
@@ -2771,13 +2824,13 @@ async function main(): Promise<void> {
     const enrichedRecords = [
       ...(sourceContexts.copart
         ? await enrichRecordsWithDetails(
-            sourceContexts.copart,
+            sourceContexts.copart.context,
             dedupedRecords.filter((item) => item.record.sourceKey === "copart"),
           )
         : []),
       ...(sourceContexts.iaai
         ? await enrichRecordsWithDetails(
-            sourceContexts.iaai,
+            sourceContexts.iaai.context,
             dedupedRecords.filter((item) => item.record.sourceKey === "iaai"),
           )
         : []),
@@ -2803,7 +2856,7 @@ async function main(): Promise<void> {
             args.baseUrl,
             ingestToken,
             ingestResult.runId,
-            sourceContexts.copart,
+            sourceContexts.copart.context,
             enrichedRecords.filter((item) => item.record.sourceKey === "copart"),
           )
         : Promise.resolve(),
@@ -2812,15 +2865,15 @@ async function main(): Promise<void> {
             args.baseUrl,
             ingestToken,
             ingestResult.runId,
-            sourceContexts.iaai,
+            sourceContexts.iaai.context,
             enrichedRecords.filter((item) => item.record.sourceKey === "iaai"),
           )
         : Promise.resolve(),
     ]);
   } finally {
-    for (const context of Object.values(sourceContexts)) {
-      if (context) {
-        await context.close().catch(() => {});
+    for (const launchedContext of Object.values(sourceContexts)) {
+      if (launchedContext) {
+        await launchedContext.close().catch(() => {});
       }
     }
   }

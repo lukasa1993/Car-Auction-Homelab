@@ -30,17 +30,15 @@ async function requireAdmin(
   return redirect(request, "/admin/login?error=Admin%20access%20required");
 }
 
-export async function handlePublicReject(request: Request, lotId: string): Promise<Response> {
+export async function handleLotReject(request: Request, lotId: string): Promise<Response> {
+  const auth = await requireAdmin(request);
+  if (auth instanceof Response) {
+    return auth;
+  }
   const form = await request.formData();
   const redirectTo = formString(form, "redirect", "/");
-  const auth = await getAuthState(request);
   const store = await getAuctionStore();
-  await store.setWorkflowState(
-    lotId,
-    "removed",
-    auth.email || "public",
-    auth.email ? "Rejected from lot page" : "Rejected from public lot page",
-  );
+  await store.setWorkflowState(lotId, "removed", auth.email || "admin", "Rejected from lot page");
   if (isAsyncRequest(request)) {
     return Response.json({ ok: true, lotId, workflowState: "removed" });
   }

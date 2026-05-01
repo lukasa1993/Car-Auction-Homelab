@@ -390,12 +390,14 @@ function lotListSortValue(row: LotRow): number {
   return Number.isNaN(milliseconds) ? 9_999_999_999_997 : milliseconds;
 }
 
+const SOLD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
 function isExactPastAuction(lot: LotRow, nowMs: number): boolean {
   if (!lot.auctionDate || !lot.auctionDate.includes("T")) {
     return false;
   }
   const auctionMs = Date.parse(lot.auctionDate);
-  return Number.isFinite(auctionMs) && auctionMs <= nowMs - 2 * 60 * 60 * 1000;
+  return Number.isFinite(auctionMs) && auctionMs <= nowMs - SOLD_TIMEOUT_MS;
 }
 
 function getNextSoldPriceAttemptAt(
@@ -909,6 +911,7 @@ export class AuctionD1Store {
   }
 
   async getPublicLotList(): Promise<LotListItem[]> {
+    await this.markTimedOutLotsDone(new Date().toISOString());
     const activeTargets = await this.getVinTargets(true);
     const activeTargetKeys = new Set(activeTargets.map((target) => target.key));
     const activeCarTypes = new Set(activeTargets.map((target) => target.carType));
@@ -1041,6 +1044,20 @@ export class AuctionD1Store {
       ),
     );
     return true;
+  }
+
+  private async markTimedOutLotsDone(nowIso: string): Promise<number> {
+    const cutoffIso = new Date(Date.parse(nowIso) - SOLD_TIMEOUT_MS).toISOString();
+    return await this.run(
+      `UPDATE lots
+       SET status = 'done', updated_at = ?
+       WHERE workflow_state != 'removed'
+         AND status IN ('upcoming', 'unknown', 'missing')
+         AND auction_date LIKE '%T%'
+         AND datetime(auction_date) <= datetime(?)`,
+      nowIso,
+      cutoffIso,
+    );
   }
 
   async getSoldPriceQueue(limit = 20): Promise<SoldPriceQueueItem[]> {

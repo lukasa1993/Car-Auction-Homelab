@@ -1,6 +1,7 @@
 import * as React from "react";
+import { ExternalLink } from "lucide-react";
 
-import type { SoldPriceExplorerData, SoldPriceExplorerItem, SoldPriceSummary } from "../../lib/types";
+import type { SoldPriceExplorerData, SoldPriceExplorerItem } from "../../lib/types";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { Input } from "../components/input";
@@ -40,46 +41,22 @@ function outlierVariant(outlier: SoldPriceExplorerItem["stats"]["outlier"]): "wa
 
 function outlierLabel(outlier: SoldPriceExplorerItem["stats"]["outlier"]): string {
   if (outlier === "high") {
-    return "High";
+    return "High outlier";
   }
   if (outlier === "low") {
-    return "Low";
+    return "Low outlier";
   }
   return "Normal";
 }
 
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="min-w-0 border-t border-border/70 py-3 first:border-t-0 sm:border-l sm:border-t-0 sm:px-4 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
-      <div className="truncate text-base text-muted-foreground sm:text-sm">{label}</div>
-      <div className="font-display text-2xl font-semibold tabular-nums tracking-normal sm:text-xl">{value}</div>
-    </div>
-  );
-}
-
-function PriceSpread({ summary }: { summary: SoldPriceSummary }) {
-  return (
-    <div className="border-t border-border/70 py-4">
-      <div className="flex items-center justify-between gap-3 text-base text-muted-foreground sm:text-sm">
-        <div>Price spread</div>
-        <div className="tabular-nums">{formatUsd(summary.minUsd)} to {formatUsd(summary.maxUsd)}</div>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-0 border-y border-border/60 sm:grid-cols-5">
-        {[
-          ["Min", summary.minUsd],
-          ["Q1", summary.q1Usd],
-          ["Median", summary.medianUsd],
-          ["Q3", summary.q3Usd],
-          ["Max", summary.maxUsd],
-        ].map(([label, value]) => (
-          <div className="border-t border-border/60 py-2 first:border-t-0 sm:border-l sm:border-t-0 sm:px-3 sm:first:border-l-0" key={String(label)}>
-            <div className="truncate text-base text-muted-foreground sm:text-sm">{label}</div>
-            <div className="font-medium tabular-nums">{formatUsd(value as number | null)}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function outlierRowClass(outlier: SoldPriceExplorerItem["stats"]["outlier"]): string {
+  if (outlier === "high") {
+    return "bg-amber-500/5";
+  }
+  if (outlier === "low") {
+    return "bg-emerald-500/5";
+  }
+  return "";
 }
 
 function buildFilterAction(filters: SoldPageProps["filters"], overrides: Partial<SoldPageProps["filters"]>): string {
@@ -97,10 +74,32 @@ function buildFilterAction(filters: SoldPageProps["filters"], overrides: Partial
   return query ? `/sold?${query}` : "/sold";
 }
 
+function lotTitle(item: SoldPriceExplorerItem): string {
+  const title = stripTeslaPrefix(item.carType);
+  return item.modelYear ? `${item.modelYear} ${title}` : title;
+}
+
+function lotDetails(item: SoldPriceExplorerItem): string {
+  const color = item.soldPrice.color || item.color || extractLotColor(item.evidence);
+  return [
+    color,
+    item.soldPrice.condition,
+    item.soldPrice.damage || item.soldPrice.secondaryDamage,
+    item.soldPrice.mileage,
+    item.soldPrice.documents,
+  ]
+    .filter(Boolean)
+    .join(" · ") || "—";
+}
+
+function absoluteDelta(item: SoldPriceExplorerItem): number {
+  return Math.abs(item.stats.deltaUsd ?? 0);
+}
+
 function SoldFilters({ props }: { props: SoldPageProps }) {
   const { filters, options } = props;
   return (
-    <form action="/sold" className="grid gap-2 rounded-2xl border border-border/70 p-3 @container" method="get">
+    <form action="/sold" className="grid gap-2 rounded-lg border border-border/70 p-3 @container" method="get">
       <div className="grid gap-2 @3xl:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto]">
         <Input
           aria-label="Search sold results"
@@ -145,7 +144,7 @@ function SoldFilters({ props }: { props: SoldPageProps }) {
             type="checkbox"
             value="1"
           />
-          Highlighted only
+          Outliers only
         </label>
         <div className="flex items-center gap-2">
           <a href="/sold">
@@ -158,17 +157,69 @@ function SoldFilters({ props }: { props: SoldPageProps }) {
   );
 }
 
-function RowMeta({ item }: { item: SoldPriceExplorerItem }) {
-  const color = item.soldPrice.color || item.color || extractLotColor(item.evidence);
+function LotPriceDelta({ item }: { item: SoldPriceExplorerItem }) {
   return (
-    <div className="min-w-64">
-      <a className="font-medium text-foreground underline-offset-2 hover:underline" href={`/lots/${item.sourceKey}/${item.lotNumber}`}>
-        {item.modelYear ? `${item.modelYear} ` : ""}{stripTeslaPrefix(item.carType)}
-      </a>
-      <div className="text-base text-muted-foreground sm:text-sm">
-        {[color, item.soldPrice.condition, item.soldPrice.damage || item.soldPrice.secondaryDamage].filter(Boolean).join(" · ") || "—"}
+    <div className="grid gap-1">
+      <div className="font-semibold tabular-nums">{formatUsd(item.soldPrice.finalBidUsd)}</div>
+      <div className="flex flex-wrap items-center justify-end gap-1.5 text-sm text-muted-foreground">
+        <Badge variant={outlierVariant(item.stats.outlier)}>{outlierLabel(item.stats.outlier)}</Badge>
+        <span className="tabular-nums">
+          {formatSignedUsd(item.stats.deltaUsd)} · {formatPercent(item.stats.deltaPercent)}
+        </span>
+      </div>
+      <div className="text-sm tabular-nums text-muted-foreground">
+        Median {formatUsd(item.stats.medianUsd)} · {item.stats.groupCount} lot{item.stats.groupCount === 1 ? "" : "s"}
       </div>
     </div>
+  );
+}
+
+function OutlierLots({ items }: { items: SoldPriceExplorerItem[] }) {
+  const outliers = items
+    .filter((item) => item.stats.outlier)
+    .sort((left, right) => absoluteDelta(right) - absoluteDelta(left));
+
+  return (
+    <section className="grid gap-3 border-y border-border/70 py-4">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Outlier lots</h2>
+          <p className="text-base text-muted-foreground sm:text-sm">
+            {outliers.length ? `${outliers.length} lot${outliers.length === 1 ? "" : "s"} outside the cohort range` : "No outliers in this view"}
+          </p>
+        </div>
+      </div>
+      {outliers.length ? (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {outliers.slice(0, 12).map((item) => (
+            <a
+              className={`grid grid-cols-[auto_1fr] gap-3 rounded-lg border border-border/70 p-3 transition-colors hover:bg-accent/60 ${outlierRowClass(item.stats.outlier)}`}
+              href={`/lots/${item.sourceKey}/${item.lotNumber}`}
+              key={item.soldPrice.id}
+            >
+              <LotImagePreview
+                lot={item}
+                placeholderClassName="size-16 rounded-lg"
+                thumbClassName="size-16 rounded-lg"
+              />
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="truncate font-medium text-foreground">Lot {item.lotNumber}</div>
+                  <Badge variant={outlierVariant(item.stats.outlier)}>{outlierLabel(item.stats.outlier)}</Badge>
+                </div>
+                <div className="mt-1 truncate text-sm text-muted-foreground">{lotTitle(item)}</div>
+                <div className="mt-2 flex items-baseline justify-between gap-2">
+                  <div className="font-semibold tabular-nums">{formatUsd(item.soldPrice.finalBidUsd)}</div>
+                  <div className="text-sm tabular-nums text-muted-foreground">
+                    {formatSignedUsd(item.stats.deltaUsd)}
+                  </div>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -181,52 +232,37 @@ function SoldTable({ items }: { items: SoldPriceExplorerItem[] }) {
             <tr className="border-b border-border/70 text-muted-foreground">
               <th className="whitespace-nowrap py-3 pr-3 font-medium">Lot</th>
               <th className="whitespace-nowrap px-3 py-3 font-medium">Vehicle</th>
-              <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Final bid</th>
-              <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Delta</th>
-              <th className="whitespace-nowrap px-3 py-3 font-medium">Sale date</th>
+              <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Price check</th>
+              <th className="whitespace-nowrap px-3 py-3 font-medium">Sale</th>
               <th className="whitespace-nowrap px-3 py-3 font-medium">Location</th>
-              <th className="whitespace-nowrap py-3 pl-3 text-right font-medium">Evidence</th>
+              <th className="whitespace-nowrap py-3 pl-3 text-right font-medium">Links</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item) => (
-              <tr
-                className={`border-b border-border/70 ${
-                  item.stats.outlier === "high"
-                    ? "bg-amber-500/5"
-                    : item.stats.outlier === "low"
-                      ? "bg-emerald-500/5"
-                      : ""
-                }`}
-                key={item.soldPrice.id}
-              >
+              <tr className={`border-b border-border/70 ${outlierRowClass(item.stats.outlier)}`} key={item.soldPrice.id}>
                 <td className="py-3 pr-3 align-middle">
                   <div className="flex items-center gap-3">
                     <LotImagePreview
                       lot={item}
-                      placeholderClassName="size-14 rounded-xl"
-                      thumbClassName="size-14 rounded-xl"
+                      placeholderClassName="size-14 rounded-lg"
+                      thumbClassName="size-14 rounded-lg"
                     />
                     <div>
-                      <div className="font-medium text-foreground">Lot {item.lotNumber}</div>
+                      <a className="font-medium text-foreground underline-offset-2 hover:underline" href={`/lots/${item.sourceKey}/${item.lotNumber}`}>
+                        Lot {item.lotNumber}
+                      </a>
                       <div className="text-base text-muted-foreground sm:text-sm">{item.sourceLabel}</div>
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-3 align-middle">
-                  <RowMeta item={item} />
+                <td className="min-w-72 px-3 py-3 align-middle">
+                  <div className="font-medium text-foreground">{lotTitle(item)}</div>
+                  <div className="text-base text-muted-foreground sm:text-sm">{lotDetails(item)}</div>
+                  {item.vin ? <div className="text-sm text-muted-foreground">{item.vin}</div> : null}
                 </td>
                 <td className="px-3 py-3 text-right align-middle">
-                  <div className="font-semibold tabular-nums">{formatUsd(item.soldPrice.finalBidUsd)}</div>
-                  <div className="text-base text-muted-foreground sm:text-sm">Median {formatUsd(item.stats.medianUsd)}</div>
-                </td>
-                <td className="px-3 py-3 text-right align-middle">
-                  <div className="flex justify-end">
-                    <Badge variant={outlierVariant(item.stats.outlier)}>{outlierLabel(item.stats.outlier)}</Badge>
-                  </div>
-                  <div className="text-base tabular-nums text-muted-foreground sm:text-sm">
-                    {formatSignedUsd(item.stats.deltaUsd)} · {formatPercent(item.stats.deltaPercent)}
-                  </div>
+                  <LotPriceDelta item={item} />
                 </td>
                 <td className="px-3 py-3 align-middle">
                   <div className="tabular-nums">{saleDateLabel(item.soldPrice.saleDate)}</div>
@@ -241,14 +277,22 @@ function SoldTable({ items }: { items: SoldPriceExplorerItem[] }) {
                 </td>
                 <td className="px-3 py-3 align-middle">
                   <div>{item.soldPrice.location || item.location || "—"}</div>
-                  <div className="text-base text-muted-foreground sm:text-sm">{item.soldPrice.mileage || item.soldPrice.documents || ""}</div>
+                  <div className="text-base text-muted-foreground sm:text-sm">{item.stats.groupLabel}</div>
                 </td>
                 <td className="py-3 pl-3 text-right align-middle">
-                  {item.soldPrice.externalUrl ? (
-                    <a href={item.soldPrice.externalUrl} rel="noopener noreferrer" target="_blank">
-                      <Button size="sm" type="button" variant="outline">bid.cars</Button>
+                  <div className="flex justify-end gap-2">
+                    <a href={item.url} rel="noopener noreferrer" target="_blank">
+                      <Button size="sm" type="button" variant="outline">
+                        Source
+                        <ExternalLink className="size-3.5" />
+                      </Button>
                     </a>
-                  ) : null}
+                    {item.soldPrice.externalUrl ? (
+                      <a href={item.soldPrice.externalUrl} rel="noopener noreferrer" target="_blank">
+                        <Button size="sm" type="button" variant="outline">bid.cars</Button>
+                      </a>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -272,37 +316,22 @@ export function SoldPage(props: SoldPageProps) {
   return (
     <main className="min-h-dvh bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1180px] flex-col gap-5">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-normal">Sold Explorer</h1>
-          <p className="text-base text-muted-foreground sm:text-sm">
-            {props.summary.count} sold result{props.summary.count === 1 ? "" : "s"}
-          </p>
-        </div>
-
-        <section className="@container">
-          <div className="grid grid-cols-2 gap-0 border-y border-border/70 @4xl:grid-cols-5">
-            <Metric label="Count" value={props.summary.count.toLocaleString()} />
-            <Metric label="Median" value={formatUsd(props.summary.medianUsd)} />
-            <Metric label="Q1 / Q3" value={`${formatUsd(props.summary.q1Usd)} / ${formatUsd(props.summary.q3Usd)}`} />
-            <Metric label="Range" value={`${formatUsd(props.summary.minUsd)} - ${formatUsd(props.summary.maxUsd)}`} />
-            <Metric label="Highlighted" value={props.summary.outlierCount.toLocaleString()} />
-          </div>
-          <PriceSpread summary={props.summary} />
-        </section>
-
-        <SoldFilters props={props} />
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-base text-muted-foreground sm:text-sm">
-            Showing {props.items.length.toLocaleString()} row{props.items.length === 1 ? "" : "s"}
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">Sold lots</h1>
+            <p className="text-base text-muted-foreground sm:text-sm">
+              Showing {props.items.length.toLocaleString()} lot{props.items.length === 1 ? "" : "s"}
+            </p>
           </div>
           <a href={activeHighlightedHref}>
             <Button size="sm" type="button" variant="outline">
-              {props.filters.highlightedOnly ? "Show all" : "Highlighted"}
+              {props.filters.highlightedOnly ? "Show all" : "Outliers"}
             </Button>
           </a>
         </div>
 
+        <SoldFilters props={props} />
+        <OutlierLots items={props.items} />
         <SoldTable items={props.items} />
       </div>
     </main>

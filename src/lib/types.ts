@@ -274,16 +274,6 @@ export interface SoldPriceExplorerItem extends LotListItem {
   stats: SoldPriceStats;
 }
 
-export interface SoldPriceSummary {
-  count: number;
-  medianUsd: number | null;
-  q1Usd: number | null;
-  q3Usd: number | null;
-  minUsd: number | null;
-  maxUsd: number | null;
-  outlierCount: number;
-}
-
 export interface SoldPriceExplorerFilters {
   model: string;
   source: string;
@@ -303,7 +293,6 @@ export interface SoldPriceExplorerOptions {
 
 export interface SoldPriceExplorerData {
   items: SoldPriceExplorerItem[];
-  summary: SoldPriceSummary;
   filters: SoldPriceExplorerFilters;
   options: SoldPriceExplorerOptions;
 }
