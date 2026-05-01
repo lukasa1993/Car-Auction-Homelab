@@ -16,7 +16,7 @@ export function AuthPage({ mode = "login", error, message }: AuthPageProps) {
 
   return (
     <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
-      <div className="mx-auto max-w-[520px]">
+      <div className="mx-auto max-w-130">
         <p className="mb-4 text-sm text-muted-foreground">Admin</p>
         <div className="rounded-md border border-border bg-card p-5">
           {error ? (
