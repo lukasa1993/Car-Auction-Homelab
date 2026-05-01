@@ -18,11 +18,11 @@
     "head_sampling_rate": 1,
     "logs": {
       "enabled": true,
-      "invocation_logs": true
+      "invocation_logs": true,
     },
     "traces": {
-      "enabled": true
-    }
+      "enabled": true,
+    },
   },
   "vars": {
     "AUCTION_BASE_URL": "https://auc.ldev.cloud",

@@ -5,7 +5,7 @@
   "scripts": {
     "setup:env": "bun scripts/generate-env.ts",
     "collector:release": "bun scripts/publish-collector-release.ts",
-    "dev": "vp dev --port 3005",
+    "dev": "vp dev",
     "build": "vp build",
     "lint": "bunx wrangler types && bun run format",
     "format": "vp check --fix && vp lint --type-aware --fix",
@@ -13,17 +13,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler --config ./wrangler.jsonc d1 migrations apply auction --local",
     "db:apply-prod": "wrangler --config ./wrangler.jsonc d1 migrations apply auction --remote",
-    "legacy:styles:build": "bunx @tailwindcss/cli -i ./src/styles/app.css -o ./public/app.css --minify",
-    "legacy:client:build": "bun build src/ui/client.tsx --outfile public/app.js --target browser --minify",
-    "legacy:assets:build": "bun run legacy:styles:build && bun run legacy:client:build",
-    "legacy:build:server:bin": "bun run legacy:assets:build && bun scripts/build-server-executable.ts",
-    "legacy:dev": "bun run legacy:styles:build && bun --watch src/server.tsx",
-    "legacy:start": "bun src/server.tsx",
     "collector:headed": "bash ./scripts/run-headed-collector.sh",
     "sold-prices:headed": "bash ./scripts/run-sold-price-runner.sh",
     "collector:bootstrap": "bun collector/bootstrap.ts --public-key-file ./runner-keys/collector-signing-key.pub.pem",
-    "collector:local": "bun collector/auction-runner.ts",
-    "check:server": "bun src/server.tsx"
+    "collector:local": "bun collector/auction-runner.ts"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "1.33.1",
@@ -44,7 +37,6 @@
     "web-push": "3.6.7"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "4.2.2",
     "@types/bun": "1.3.11",
     "@types/node": "25.5.0",
     "@types/react": "19.2.14",
