@@ -1,52 +1,58 @@
-import { createHash } from "node:crypto";
-
+import "@tanstack/react-start/server-only";
 import { betterAuth } from "better-auth";
-import { getMigrations } from "better-auth/db/migration";
-import { createAuthDatabase } from "../models/auth-database";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { db } from "@/lib/db";
+import { getSecrets } from "@/utils/env";
 
-const baseUrl = (process.env.AUCTION_BASE_URL || process.env.BETTER_AUTH_URL || "http://localhost:3005").replace(/\/$/, "");
-const databasePath = process.env.AUCTION_SQLITE_PATH || `${process.cwd()}/data/auction.sqlite`;
-const baseOrigin = new URL(baseUrl).origin;
-const extraTrustedOrigins = String(process.env.AUCTION_TRUSTED_ORIGINS || "")
-  .split(",")
-  .map((value) => value.trim())
-  .filter(Boolean);
-const localDevOrigins = [
-  "http://localhost:3005",
-  "http://127.0.0.1:3005",
-  "http://localhost",
-  "http://127.0.0.1",
-];
-const trustedOrigins = [...new Set([baseOrigin, ...localDevOrigins, ...extraTrustedOrigins])];
-const useSecureCookies = String(process.env.AUCTION_USE_SECURE_COOKIES || "false").toLowerCase() === "true";
-const secret =
-  process.env.BETTER_AUTH_SECRET ||
-  process.env.AUCTION_AUTH_SECRET ||
-  createHash("sha256").update(`auction-better-auth:${process.env.AUCTION_ADMIN_PASSWORD || "change-me"}`).digest("hex");
-const adminEmailAllowlist = new Set(
-  String(process.env.AUCTION_ADMIN_EMAILS || "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean),
-);
-const bootstrapAdminEmail = [...adminEmailAllowlist][0] ?? null;
-const bootstrapAdminPassword = process.env.AUCTION_ADMIN_PASSWORD || null;
+function getBaseUrl(): string {
+  return getSecrets().BETTER_AUTH_URL.replace(/\/$/, "");
+}
 
-const authDatabase = createAuthDatabase(databasePath);
+function getAuthSecret(): string {
+  const secrets = getSecrets();
+  if (secrets.BETTER_AUTH_SECRET) {
+    return secrets.BETTER_AUTH_SECRET;
+  }
+  const baseUrl = secrets.BETTER_AUTH_URL.replace(/\/$/, "");
+  if (baseUrl.startsWith("http://localhost") || baseUrl.startsWith("http://127.0.0.1")) {
+    return "dev-insecure-auction-auth-secret";
+  }
+  throw new Error("BETTER_AUTH_SECRET is required for auction auth");
+}
+
+function getTrustedOrigins(): string[] {
+  const baseUrl = getBaseUrl();
+  const origin = new URL(baseUrl).origin;
+  return [
+    origin,
+    "http://localhost:3005",
+    "http://127.0.0.1:3005",
+    "http://localhost",
+    "http://127.0.0.1",
+  ];
+}
+
+function getAdminEmailAllowlist(): Set<string> {
+  return new Set(
+    getSecrets()
+      .AUCTION_ADMIN_EMAILS.split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
 
 export const auth = betterAuth({
-  baseURL: baseUrl,
-  secret,
-  database: authDatabase,
+  baseURL: getBaseUrl(),
+  secret: getAuthSecret(),
+  database: drizzleAdapter(db, { provider: "sqlite" }),
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
   },
-  trustedOrigins,
+  trustedOrigins: getTrustedOrigins(),
   advanced: {
-    useSecureCookies,
     database: {
       generateId: () => crypto.randomUUID(),
     },
@@ -54,9 +60,40 @@ export const auth = betterAuth({
 });
 
 export async function ensureBetterAuthSchema(): Promise<void> {
-  const { runMigrations } = await getMigrations(auth.options);
-  await runMigrations();
   await ensureBootstrapAdminUser();
+}
+
+export async function ensureBootstrapAdminUser(): Promise<void> {
+  const secrets = getSecrets();
+  const bootstrapAdminEmail = [...getAdminEmailAllowlist()][0] ?? null;
+  const bootstrapAdminPassword = secrets.AUCTION_ADMIN_PASSWORD || null;
+  if (!bootstrapAdminEmail || !bootstrapAdminPassword) {
+    return;
+  }
+
+  const response = await auth.handler(
+    new Request(`${getBaseUrl()}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: new URL(getBaseUrl()).origin,
+      },
+      body: JSON.stringify({
+        name: bootstrapAdminEmail.split("@")[0],
+        email: bootstrapAdminEmail,
+        password: bootstrapAdminPassword,
+      }),
+    }),
+  );
+
+  if (response.ok || response.status === 422) {
+    return;
+  }
+
+  const body = await response.text().catch(() => "");
+  throw new Error(
+    `Failed to bootstrap admin user ${bootstrapAdminEmail}: ${response.status} ${body}`,
+  );
 }
 
 export async function getAuthState(request: Request): Promise<{
@@ -65,15 +102,10 @@ export async function getAuthState(request: Request): Promise<{
   email: string | null;
   session: { session: Record<string, unknown>; user: { email: string } } | null;
 }> {
-  const response = await auth.handler(
-    new Request(`${baseUrl}/api/auth/get-session`, {
-      method: "GET",
-      headers: request.headers,
-    }),
-  );
-  const session = response.ok
-    ? (await response.json() as { session: Record<string, unknown>; user: { email: string } } | null)
-    : null;
+  const session = (await auth.api.getSession({ headers: request.headers }).catch(() => null)) as {
+    session: Record<string, unknown>;
+    user: { email: string };
+  } | null;
   const email = session?.user?.email ?? null;
   return {
     signedIn: Boolean(session?.session),
@@ -87,19 +119,24 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) {
     return false;
   }
+  const adminEmailAllowlist = getAdminEmailAllowlist();
   if (adminEmailAllowlist.size === 0) {
     return true;
   }
   return adminEmailAllowlist.has(email.toLowerCase());
 }
 
-export async function dispatchAuthRequest(pathname: string, request: Request, body?: unknown): Promise<Response> {
+export async function dispatchAuthRequest(
+  pathname: string,
+  request: Request,
+  body?: unknown,
+): Promise<Response> {
   const headers = new Headers(request.headers);
   if (body !== undefined) {
     headers.set("content-type", "application/json");
   }
   return await auth.handler(
-    new Request(`${baseUrl}${pathname}`, {
+    new Request(`${getBaseUrl()}${pathname}`, {
       method: body === undefined ? request.method : "POST",
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -122,40 +159,34 @@ export function forwardSetCookieHeaders(source: Response, destination: Headers):
   }
 }
 
-export function requireBearer(request: Request, expectedToken: string): boolean {
-  const authorization = request.headers.get("authorization") ?? "";
-  if (!authorization.startsWith("Bearer ")) {
-    return false;
+export async function authRedirectFromResponse(
+  response: Response,
+  successPath: string,
+  failurePath: string,
+): Promise<Response> {
+  const headers = new Headers({ location: successPath });
+  forwardSetCookieHeaders(response, headers);
+  if (!response.ok) {
+    let message = "Login failed";
+    try {
+      const body = (await response.clone().json()) as { message?: string; error?: string };
+      message = body.message || body.error || message;
+    } catch {
+      const body = await response.text().catch(() => "");
+      if (body.trim()) {
+        message = body.trim();
+      }
+    }
+    headers.set("location", `${failurePath}?error=${encodeURIComponent(message)}`);
   }
-  return authorization.slice("Bearer ".length).trim() === expectedToken;
+  return new Response(null, { status: 303, headers });
 }
 
-async function ensureBootstrapAdminUser(): Promise<void> {
-  if (!bootstrapAdminEmail || !bootstrapAdminPassword) {
-    return;
-  }
-
-  const response = await auth.handler(
-    new Request(`${baseUrl}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        origin: baseOrigin,
-      },
-      body: JSON.stringify({
-        name: bootstrapAdminEmail.split("@")[0],
-        email: bootstrapAdminEmail,
-        password: bootstrapAdminPassword,
-      }),
-    }),
+export function requireBearer(request: Request, expectedToken: string): boolean {
+  const authorization = request.headers.get("authorization") ?? "";
+  return (
+    Boolean(expectedToken) &&
+    authorization.startsWith("Bearer ") &&
+    authorization.slice("Bearer ".length).trim() === expectedToken
   );
-
-  if (response.ok || response.status === 422) {
-    return;
-  }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Failed to bootstrap admin user ${bootstrapAdminEmail}: ${response.status} ${body}`);
-  }
 }

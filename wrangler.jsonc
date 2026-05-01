@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ldev-auction",
+  "account_id": "38dd2e8692a8a1db8721b47b07941873",
+  "compatibility_date": "2026-04-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./src/server.ts",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "auc.ldev.cloud",
+      "custom_domain": true,
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "vars": {
+    "AUCTION_BASE_URL": "https://auc.ldev.cloud",
+    "AUCTION_COLLECTOR_VERSION": "2026.04.06.2",
+    "AUCTION_MINIMUM_RUNNER_VERSION": "2026.04.06.2",
+  },
+  "d1_databases": [
+    {
+      "binding": "d1",
+      "database_name": "auction",
+      "database_id": "bd145ca7-ea45-4702-8c62-48bb74dbf564",
+      "migrations_dir": "drizzle",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "AUCTION_IMAGES",
+      "bucket_name": "auction-images",
+    },
+  ],
+}

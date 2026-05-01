@@ -172,7 +172,7 @@ function RowMeta({ item }: { item: SoldPriceExplorerItem }) {
   );
 }
 
-function SoldTable({ items, filters }: { items: SoldPriceExplorerItem[]; filters: SoldPageProps["filters"] }) {
+function SoldTable({ items }: { items: SoldPriceExplorerItem[] }) {
   return (
     <div className="-mx-3 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-5">
       <div className="inline-block min-w-full px-3 py-2 align-middle sm:px-5">
@@ -316,7 +316,7 @@ export function SoldPage(props: SoldPageProps) {
           </a>
         </div>
 
-        <SoldTable filters={props.filters} items={props.items} />
+        <SoldTable items={props.items} />
       </div>
     </main>
   );

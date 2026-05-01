@@ -1,0 +1,7 @@
+BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
+BETTER_AUTH_URL="http://localhost:3005"
+AUCTION_ADMIN_EMAILS="admin@example.com"
+AUCTION_ADMIN_PASSWORD="replace-with-a-strong-password"
+AUCTION_BASE_URL="http://localhost:3005"
+AUCTION_COLLECTOR_VERSION="2026.04.06.2"
+AUCTION_MINIMUM_RUNNER_VERSION="2026.04.06.2"

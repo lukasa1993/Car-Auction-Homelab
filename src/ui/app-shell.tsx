@@ -11,7 +11,11 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = atob(base64);
-  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0))).buffer as ArrayBuffer;
+  const bytes = new Uint8Array(rawData.length);
+  for (let index = 0; index < rawData.length; index += 1) {
+    bytes[index] = rawData.charCodeAt(index);
+  }
+  return bytes.buffer as ArrayBuffer;
 }
 
 const PTR_THRESHOLD = 72;
@@ -85,7 +89,8 @@ function usePushNotifications() {
 
     fetch("/api/push/vapid-key")
       .then((r) => r.json())
-      .then((data: { publicKey: string }) => {
+      .then((value: unknown) => {
+        const data = value as { publicKey?: string };
         if (data.publicKey) setVapidKey(data.publicKey);
       })
       .catch(() => {});
@@ -125,13 +130,7 @@ function usePushNotifications() {
   return { permission, subscribed, supported, subscribe };
 }
 
-function ToastCard({
-  toast,
-  onExpire,
-}: {
-  toast: LiveToast;
-  onExpire: (id: number) => void;
-}) {
+function ToastCard({ toast, onExpire }: { toast: LiveToast; onExpire: (id: number) => void }) {
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
       onExpire(toast.id);
@@ -144,7 +143,9 @@ function ToastCard({
 
   return (
     <div className="pointer-events-auto rounded-[1.5rem] border border-border bg-card/95 px-4 py-3 text-card-foreground shadow-[0_20px_60px_-32px_rgba(18,18,18,0.42)] backdrop-blur-xl">
-      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{toast.title}</div>
+      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+        {toast.title}
+      </div>
       <div className="text-sm font-medium leading-6">{toast.message}</div>
     </div>
   );
@@ -174,14 +175,16 @@ export function AppShell({ children, isAdmin }: { children: React.ReactNode; isA
           title?: string;
           message?: string;
         };
-        setToasts((current) => [
-          {
-            id: nextToastId.current++,
-            title: payload.title || "Live update",
-            message: payload.message || "Collector activity detected.",
-          },
-          ...current,
-        ].slice(0, 4));
+        setToasts((current) =>
+          [
+            {
+              id: nextToastId.current++,
+              title: payload.title || "Live update",
+              message: payload.message || "Collector activity detected.",
+            },
+            ...current,
+          ].slice(0, 4),
+        );
         setBannerMessage(payload.message || "New collector sync available. Refresh to load it.");
       } catch {
         // Ignore malformed event payloads.
@@ -259,7 +262,9 @@ export function AppShell({ children, isAdmin }: { children: React.ReactNode; isA
         {bannerMessage ? (
           <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-border/80 bg-card/95 px-4 py-3 text-sm text-card-foreground shadow-[0_18px_60px_-28px_rgba(18,18,18,0.42)] backdrop-blur-xl">
             <div className="space-y-0.5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Live update</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Live update
+              </p>
               <p className="font-medium">{bannerMessage}</p>
             </div>
             <button

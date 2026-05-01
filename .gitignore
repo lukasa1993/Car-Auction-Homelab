@@ -4,6 +4,7 @@ collector/.tmp*
 collector/node_modules/
 collector/dist/
 dist/
+.wrangler/
 data/
 public/app.css
 public/app.js
