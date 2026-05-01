@@ -284,7 +284,7 @@ export type LotDetailPageData = {
 };
 
 export const getLoginPageData = createServerFn()
-  .inputValidator((data: { error?: string | null } | undefined) => data ?? {})
+  .inputValidator((data: { error?: string | null; message?: string | null } | undefined) => data ?? {})
   .handler(async ({ data }) => {
     const request = getRequest();
     const { ensureBootstrapAdminUser, getAuthState } = await import("@/lib/auth");
@@ -293,5 +293,6 @@ export const getLoginPageData = createServerFn()
     return {
       redirectTo: auth.admin && auth.email ? "/admin" : null,
       error: data?.error ?? null,
+      message: data?.message ?? null,
     };
   });
