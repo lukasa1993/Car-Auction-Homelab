@@ -15,3 +15,4 @@ runner-keys/
 __pycache__/
 *.pyc
 .DS_Store
+.dev.vars
