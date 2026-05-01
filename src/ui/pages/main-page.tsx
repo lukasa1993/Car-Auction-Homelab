@@ -305,7 +305,7 @@ export function MainPage({
 
   return (
     <main className="min-h-dvh bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
-      <div className="mx-auto flex max-w-[1040px] flex-col gap-4">
+      <div className="mx-auto flex max-w-260 flex-col gap-4">
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-base font-semibold">Live lots</h1>
           <span className="text-[12px] tabular-nums text-muted-foreground">
@@ -314,7 +314,7 @@ export function MainPage({
         </div>
 
         {soonLots.length > 0 ? (
-          <Card className="bg-[color:var(--soon-bg)] ring-[color:var(--soon-border)]">
+          <Card className="bg-(--soon-bg) ring-(--soon-border)">
             <CardHeader className="pb-0">
               <CardTitle className="text-sm">Live now & upcoming &lt; 12h</CardTitle>
             </CardHeader>
