@@ -1,4 +1,0 @@
-[install]
-exact = true
-auto = "disable"
-saveTextLockfile = true
