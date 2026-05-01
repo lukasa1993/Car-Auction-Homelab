@@ -11,5 +11,10 @@ export const getRootData = createServerFn().handler(async () => {
     dateRender: buildDateRenderConfig(request),
     initialThemePreference: getThemePreferenceFromRequest(request),
     isAdmin: auth.admin,
+    auth: {
+      signedIn: auth.signedIn,
+      admin: auth.admin,
+      email: auth.email,
+    },
   };
 });

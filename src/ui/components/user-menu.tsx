@@ -1,6 +1,15 @@
 import * as React from "react";
 import { ChevronDown, LogOut } from "lucide-react";
 
+import { cn } from "../lib";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./dropdown-menu";
+
 function getInitials(email: string): string {
   const name = email.split("@")[0] || email;
   const parts = name.split(/[._-]/).filter(Boolean);
@@ -13,74 +22,43 @@ function getInitials(email: string): string {
 export interface UserMenuProps {
   email: string;
   logoutAction?: string;
+  className?: string;
 }
 
-export function UserMenu({ email, logoutAction = "/admin/logout" }: UserMenuProps) {
-  const [open, setOpen] = React.useState(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
+export function UserMenu({ email, logoutAction = "/admin/logout", className }: UserMenuProps) {
   const initials = getInitials(email);
 
   return (
-    <div className="relative" ref={containerRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="flex h-8 items-center gap-2 rounded-3xl border border-border bg-card px-1.5 pr-2 text-xs font-medium text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        onClick={() => setOpen((v) => !v)}
-        type="button"
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(
+          "flex h-9 items-center gap-2 rounded-full border border-border bg-card pl-1 pr-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-muted",
+          className,
+        )}
+        aria-label={`Account menu for ${email}`}
       >
-        <span className="flex size-5 items-center justify-center rounded-full bg-foreground text-[9px] font-semibold uppercase tracking-wide text-background">
+        <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold uppercase tracking-wide text-background">
           {initials}
         </span>
-        <span className="hidden max-w-[160px] truncate sm:inline">{email}</span>
-        <ChevronDown
-          className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open ? (
-        <div
-          className="absolute left-0 top-[calc(100%+6px)] z-50 w-[240px] overflow-hidden rounded-2xl border border-border bg-popover shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:left-auto sm:right-0"
-          role="menu"
-        >
-          <div className="border-b border-border/70 px-3 py-3">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Signed in
-            </div>
-            <div className="mt-1 truncate text-sm font-medium text-foreground" title={email}>
-              {email}
-            </div>
-          </div>
-          <form action={logoutAction} method="post">
-            <button
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground transition hover:bg-muted"
-              role="menuitem"
-              type="submit"
-            >
-              <LogOut className="size-4 text-muted-foreground" />
-              Sign out
-            </button>
-          </form>
+        <span className="hidden max-w-40 truncate sm:inline">{email}</span>
+        <ChevronDown className="size-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel>Signed in</DropdownMenuLabel>
+        <div className="px-3 pb-2 text-sm font-medium text-foreground" title={email}>
+          <span className="block truncate">{email}</span>
         </div>
-      ) : null}
-    </div>
+        <DropdownMenuSeparator />
+        <form action={logoutAction} method="post" className="px-1.5 pb-1.5">
+          <button
+            type="submit"
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+          >
+            <LogOut className="size-4 text-muted-foreground" />
+            Sign out
+          </button>
+        </form>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -1,6 +1,8 @@
 import * as React from "react";
 import { RefreshCw } from "lucide-react";
 
+import { SiteNav, type SiteNavAuth } from "./components/site-nav";
+
 type LiveToast = {
   id: number;
   title: string;
@@ -151,12 +153,12 @@ function ToastCard({ toast, onExpire }: { toast: LiveToast; onExpire: (id: numbe
   );
 }
 
-export function AppShell({ children, isAdmin }: { children: React.ReactNode; isAdmin?: boolean }) {
+export function AppShell({ children, auth }: { children: React.ReactNode; auth: SiteNavAuth }) {
   const [bannerMessage, setBannerMessage] = React.useState<string | null>(null);
   const [toasts, setToasts] = React.useState<LiveToast[]>([]);
   const nextToastId = React.useRef(1);
   const { permission, subscribed, supported, subscribe } = usePushNotifications();
-  const showNotifyButton = isAdmin && supported && !subscribed && permission !== "granted";
+  const showNotifyButton = auth.admin && supported && !subscribed && permission !== "granted";
   const { pullY, isRefreshing, isTouching } = usePullToRefresh();
 
   const expireToast = React.useCallback((id: number) => {
@@ -291,6 +293,7 @@ export function AppShell({ children, isAdmin }: { children: React.ReactNode; isA
         ))}
       </div>
 
+      <SiteNav auth={auth} />
       {children}
     </>
   );

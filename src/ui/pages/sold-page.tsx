@@ -272,25 +272,12 @@ export function SoldPage(props: SoldPageProps) {
   return (
     <main className="min-h-dvh bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1180px] flex-col gap-5">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-normal">Sold Explorer</h1>
-            <div className="text-base text-muted-foreground sm:text-sm">
-              {props.summary.count} sold result{props.summary.count === 1 ? "" : "s"}
-            </div>
-          </div>
-          <nav className="hidden items-center gap-3 sm:flex" aria-label="Primary">
-            <a className="text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" href="/">Live lots</a>
-            <a className="text-sm text-foreground underline-offset-2 hover:underline" href="/sold">Sold</a>
-          </nav>
-          <details className="sm:hidden">
-            <summary className="cursor-pointer rounded-3xl border border-border px-3 py-2 text-base text-foreground">Menu</summary>
-            <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-border bg-card p-2">
-              <a className="rounded-xl px-3 py-2 text-base text-muted-foreground" href="/">Live lots</a>
-              <a className="rounded-xl bg-muted px-3 py-2 text-base text-foreground" href="/sold">Sold</a>
-            </div>
-          </details>
-        </header>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-normal">Sold Explorer</h1>
+          <p className="text-base text-muted-foreground sm:text-sm">
+            {props.summary.count} sold result{props.summary.count === 1 ? "" : "s"}
+          </p>
+        </div>
 
         <section className="@container">
           <div className="grid grid-cols-2 gap-0 border-y border-border/70 @4xl:grid-cols-5">

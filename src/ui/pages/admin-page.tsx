@@ -3,7 +3,6 @@ import { Plus } from "lucide-react";
 
 import type { VinTarget } from "../../lib/types";
 import { isGenericVinTargetMetadata } from "../../lib/vin-patterns";
-import { AdminHeader } from "../components/admin-header";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/card";
@@ -177,7 +176,6 @@ function TargetCard({ target }: { target: VinTarget }) {
 }
 
 export function AdminPage({
-  email,
   error,
   historyCount,
   targets,
@@ -185,15 +183,18 @@ export function AdminPage({
   const activeTargets = targets.filter((target) => target.active).length;
 
   return (
-    <main className="min-h-screen bg-background">
+    <main className="min-h-dvh bg-background">
       <div className="mx-auto flex max-w-280 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <AdminHeader active="targets" email={email} historyCount={historyCount} />
-
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">VIN family targets</h1>
-          <p className="text-sm text-muted-foreground">
-            {targets.length} total · {activeTargets} active
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">VIN family targets</h1>
+            <p className="text-sm text-muted-foreground">
+              {targets.length} total · {activeTargets} active
+              {typeof historyCount === "number" && historyCount > 0
+                ? ` · ${historyCount} in history`
+                : ""}
+            </p>
+          </div>
         </div>
 
         {error ? (

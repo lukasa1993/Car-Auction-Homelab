@@ -5,7 +5,6 @@ import { Button } from "../components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/card";
 import { LotImagePreview } from "../components/lot-image-preview";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/table";
-import { ThemeToggle } from "../components/theme-toggle";
 import { LocalizedDateText, useDateNowMs } from "../date-render";
 import {
   extractLotColor,
@@ -290,7 +289,6 @@ export function MainPage({
   lastCollectorIngestAt,
   activeTab,
   tabs,
-  auth,
 }: MainPageProps) {
   const [allLotsState, setAllLotsState] = React.useState(allLots);
   const [visibleLotsState, setVisibleLotsState] = React.useState(lots);
@@ -306,31 +304,14 @@ export function MainPage({
   const redirectTo = buildTabHref(activeTab);
 
   return (
-    <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
+    <main className="min-h-dvh bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1040px] flex-col gap-4">
-        <header className="flex items-baseline justify-between gap-3">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-base font-semibold">Auction Monitor</h1>
-            <span className="text-[12px] text-muted-foreground">{formatRelativeTimestamp(lastCollectorIngestAt, nowMs)}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <a
-              className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-              href="/sold"
-            >
-              Sold
-            </a>
-            {auth.admin ? (
-              <a
-                className="text-[12px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-                href="/admin"
-              >
-                Admin →
-              </a>
-            ) : null}
-          </div>
-        </header>
+        <div className="flex items-baseline justify-between gap-3">
+          <h1 className="text-base font-semibold">Live lots</h1>
+          <span className="text-[12px] tabular-nums text-muted-foreground">
+            {formatRelativeTimestamp(lastCollectorIngestAt, nowMs)}
+          </span>
+        </div>
 
         {soonLots.length > 0 ? (
           <Card className="bg-[color:var(--soon-bg)] ring-[color:var(--soon-border)]">

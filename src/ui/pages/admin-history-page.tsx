@@ -2,7 +2,6 @@ import * as React from "react";
 import { ExternalLink, Search } from "lucide-react";
 
 import type { LotListItem } from "../../lib/types";
-import { AdminHeader } from "../components/admin-header";
 import { Badge } from "../components/badge";
 import { Button } from "../components/button";
 import { CopyTextButton } from "../components/copy-text-button";
@@ -182,7 +181,7 @@ function RowActions({ lot }: { lot: LotListItem }) {
   );
 }
 
-export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
+export function AdminHistoryPage({ lots }: AdminHistoryPageProps) {
   const [filter, setFilter] = React.useState<FilterKey>("all");
   const [query, setQuery] = React.useState("");
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
@@ -257,10 +256,8 @@ export function AdminHistoryPage({ email, lots }: AdminHistoryPageProps) {
   }, []);
 
   return (
-    <main className="min-h-screen bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
+    <main className="min-h-dvh bg-background px-3 py-3 text-foreground sm:px-5 sm:py-5">
       <div className="mx-auto flex max-w-[1120px] flex-col gap-4">
-        <AdminHeader active="history" email={email} historyCount={counts.all} />
-
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Moderation history</h1>
           <p className="text-sm text-muted-foreground">

@@ -46,7 +46,7 @@ function RootLayout() {
         }}
       />
       <DateRenderProvider value={rootData.dateRender}>
-        <AppShell isAdmin={rootData.isAdmin}>
+        <AppShell auth={rootData.auth}>
           <Outlet />
         </AppShell>
       </DateRenderProvider>
