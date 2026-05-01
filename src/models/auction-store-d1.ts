@@ -1,13 +1,39 @@
 import "@tanstack/react-start/server-only";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  like,
+  max,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import * as schema from "@/lib/db/schema";
+import {
+  lotActions,
+  lotImages,
+  lotNotificationLog,
+  lotSnapshots,
+  lotSoldPrices,
+  lots,
+  pushSubscriptions,
+  syncRuns,
+  vinTargets,
+} from "@/lib/db/schema";
 import { DEFAULT_TARGETS } from "@/lib/default-targets";
 import type {
   IngestPayload,
-  LotActionRow,
   LotDetail,
-  LotImageRow,
   LotListItem,
   LotRow,
-  LotSnapshotRow,
   RunnerScope,
   ScrapedLotRecord,
   SoldPriceExplorerItem,
@@ -30,9 +56,10 @@ import {
   normalizeVinPattern,
 } from "@/lib/vin-patterns";
 
-/* eslint-disable @typescript-eslint/no-base-to-string */
-
-type DbValue = string | number | null | boolean;
+type AuctionDb = DrizzleD1Database<typeof schema>;
+type VinTargetRow = typeof vinTargets.$inferSelect;
+type LotRecord = typeof lots.$inferSelect;
+type SoldPriceRecord = typeof lotSoldPrices.$inferSelect;
 
 interface RunnerSummary {
   runId: string;
@@ -47,14 +74,6 @@ interface TargetMetadataUpdateSummary {
 interface SoldPriceResultSummary {
   accepted: number;
   skipped: number;
-}
-
-function boolFlag(value: boolean): number {
-  return value ? 1 : 0;
-}
-
-function rowBool(value: unknown): boolean {
-  return Number(value ?? 0) === 1;
 }
 
 function normalizeWhitespace(value: string | null | undefined): string {
@@ -198,129 +217,45 @@ function hasProtectedImageDimensions(
   return longEdge >= 1024 && shortEdge >= 720;
 }
 
-function normalizeWorkflowState(status: string | null | undefined): WorkflowState {
-  switch ((status ?? "").toLowerCase()) {
-    case "approved":
-      return "approved";
-    case "removed":
-      return "removed";
-    default:
-      return "new";
-  }
-}
-
-function mapVinTarget(row: Record<string, unknown>): VinTarget {
-  const vinPattern = normalizeVinPattern(String(row.vin_pattern));
+function toVinTarget(row: VinTargetRow): VinTarget {
+  const vinPattern = normalizeVinPattern(row.vinPattern);
   const generic = buildGenericTargetMetadata(vinPattern);
   const legacyGenericFallback = isGenericVinTargetMetadata({
-    label: String(row.label ?? ""),
-    carType: String(row.car_type ?? ""),
-    marker: String(row.marker ?? ""),
+    label: row.label,
+    carType: row.carType,
+    marker: row.marker,
     vinPattern,
     vinPrefix: deriveVinPrefix(vinPattern),
-    copartSlug: String(row.copart_slug ?? ""),
-    iaaiPath: String(row.iaai_path ?? ""),
+    copartSlug: row.copartSlug,
+    iaaiPath: row.iaaiPath,
   });
   return {
-    id: String(row.id),
-    key: String(row.key),
-    label: legacyGenericFallback ? generic.label : String(row.label),
-    carType: legacyGenericFallback ? generic.carType : String(row.car_type),
-    marker: legacyGenericFallback ? generic.marker : String(row.marker),
+    id: row.id,
+    key: row.key,
+    label: legacyGenericFallback ? generic.label : row.label,
+    carType: legacyGenericFallback ? generic.carType : row.carType,
+    marker: legacyGenericFallback ? generic.marker : row.marker,
     vinPattern,
     vinPrefix: deriveVinPrefix(vinPattern),
-    yearFrom: Number(row.year_from),
-    yearTo: Number(row.year_to),
-    copartSlug: String(row.copart_slug ?? ""),
-    iaaiPath: String(row.iaai_path ?? ""),
-    rejectColors: parseJsonStringList(row.reject_colors_json),
-    rejectLocations: parseJsonStringList(row.reject_locations_json),
-    enabledCopart: rowBool(row.enabled_copart),
-    enabledIaai: rowBool(row.enabled_iaai),
-    active: rowBool(row.active),
-    sortOrder: Number(row.sort_order ?? 0),
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
+    yearFrom: row.yearFrom,
+    yearTo: row.yearTo,
+    copartSlug: row.copartSlug,
+    iaaiPath: row.iaaiPath,
+    rejectColors: parseJsonStringList(row.rejectColorsJson),
+    rejectLocations: parseJsonStringList(row.rejectLocationsJson),
+    enabledCopart: row.enabledCopart,
+    enabledIaai: row.enabledIaai,
+    active: row.active,
+    sortOrder: row.sortOrder,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
-function mapLotRow(row: Record<string, unknown>): LotRow {
-  const vinPattern = row.vin_pattern ? normalizeVinPattern(String(row.vin_pattern)) : null;
+function toLotRow(row: LotRecord): LotRow {
   return {
-    id: String(row.id),
-    sourceKey: String(row.source_key) as SourceKey,
-    sourceLabel: String(row.source_label),
-    targetKey: row.target_key ? String(row.target_key) : null,
-    lotNumber: String(row.lot_number),
-    sourceDetailId: row.source_detail_id ? String(row.source_detail_id) : null,
-    carType: String(row.car_type),
-    marker: String(row.marker),
-    vinPattern,
-    vin: row.vin ? String(row.vin) : null,
-    modelYear: row.model_year == null ? null : Number(row.model_year),
-    yearPage: row.year_page == null ? null : Number(row.year_page),
-    status: normalizeLotStatus(String(row.status ?? "")),
-    workflowState: normalizeWorkflowState(String(row.workflow_state ?? "")),
-    workflowNote: row.workflow_note ? String(row.workflow_note) : null,
-    auctionDate: row.auction_date ? String(row.auction_date) : null,
-    auctionDateRaw: row.auction_date_raw ? String(row.auction_date_raw) : null,
-    location: row.location ? String(row.location) : null,
-    url: String(row.url),
-    evidence: row.evidence ? String(row.evidence) : null,
-    color: row.color ? String(row.color) : null,
-    sourceRawJson: row.source_raw_json ? String(row.source_raw_json) : null,
-    firstSeenAt: String(row.first_seen_at),
-    lastSeenAt: String(row.last_seen_at),
-    lastIngestedAt: String(row.last_ingested_at),
-    lastSyncRunId: row.last_sync_run_id ? String(row.last_sync_run_id) : null,
-    missingSince: row.missing_since ? String(row.missing_since) : null,
-    missingCount: Number(row.missing_count ?? 0),
-    canceledAt: row.canceled_at ? String(row.canceled_at) : null,
-    approvedAt: row.approved_at ? String(row.approved_at) : null,
-    removedAt: row.removed_at ? String(row.removed_at) : null,
-    updatedAt: String(row.updated_at),
-  };
-}
-
-function mapLotImage(row: Record<string, unknown>): LotImageRow {
-  return {
-    id: String(row.id),
-    lotId: String(row.lot_id),
-    sourceUrl: String(row.source_url),
-    storagePath: String(row.storage_path),
-    mimeType: row.mime_type ? String(row.mime_type) : null,
-    sha256: String(row.sha256),
-    byteSize: Number(row.byte_size),
-    width: row.width == null ? null : Number(row.width),
-    height: row.height == null ? null : Number(row.height),
-    sortOrder: Number(row.sort_order ?? 0),
-    createdAt: String(row.created_at),
-    lastSeenAt: String(row.last_seen_at),
-    lastSyncRunId: row.last_sync_run_id ? String(row.last_sync_run_id) : null,
-    active: rowBool(row.active),
-  };
-}
-
-function mapLotSnapshot(row: Record<string, unknown>): LotSnapshotRow {
-  return {
-    id: String(row.id),
-    lotId: String(row.lot_id),
-    syncRunId: row.sync_run_id ? String(row.sync_run_id) : null,
-    observedAt: String(row.observed_at),
-    isPresent: rowBool(row.is_present),
-    snapshotJson: String(row.snapshot_json),
-  };
-}
-
-function mapLotAction(row: Record<string, unknown>): LotActionRow {
-  return {
-    id: String(row.id),
-    lotId: String(row.lot_id),
-    action: String(row.action),
-    actor: String(row.actor),
-    note: row.note ? String(row.note) : null,
-    metadataJson: row.metadata_json ? String(row.metadata_json) : null,
-    createdAt: String(row.created_at),
+    ...row,
+    vinPattern: row.vinPattern ? normalizeVinPattern(row.vinPattern) : null,
   };
 }
 
@@ -337,50 +272,6 @@ function normalizeSoldPriceLookupStatus(
     default:
       return "not_found";
   }
-}
-
-function nullableNumber(value: unknown): number | null {
-  if (value == null || value === "") {
-    return null;
-  }
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function mapSoldPrice(row: Record<string, unknown>): SoldPriceRow {
-  return {
-    id: String(row.id),
-    lotId: String(row.lot_id),
-    lookupStatus: normalizeSoldPriceLookupStatus(String(row.lookup_status ?? "")),
-    attemptCount: Number(row.attempt_count ?? 0),
-    lastAttemptedAt: row.last_attempted_at ? String(row.last_attempted_at) : null,
-    nextAttemptAt: row.next_attempt_at ? String(row.next_attempt_at) : null,
-    foundAt: row.found_at ? String(row.found_at) : null,
-    externalUrl: row.external_url ? String(row.external_url) : null,
-    matchedQuery: row.matched_query ? String(row.matched_query) : null,
-    matchConfidence: nullableNumber(row.match_confidence),
-    finalBidUsd: nullableNumber(row.final_bid_usd),
-    saleDate: row.sale_date ? String(row.sale_date) : null,
-    saleDateRaw: row.sale_date_raw ? String(row.sale_date_raw) : null,
-    externalSourceKey: row.external_source_key
-      ? (String(row.external_source_key) as SourceKey)
-      : null,
-    externalSourceLabel: row.external_source_label ? String(row.external_source_label) : null,
-    externalLotNumber: row.external_lot_number ? String(row.external_lot_number) : null,
-    externalVin: row.external_vin ? String(row.external_vin) : null,
-    condition: row.condition ? String(row.condition) : null,
-    damage: row.damage ? String(row.damage) : null,
-    secondaryDamage: row.secondary_damage ? String(row.secondary_damage) : null,
-    mileage: row.mileage ? String(row.mileage) : null,
-    location: row.location ? String(row.location) : null,
-    color: row.color ? String(row.color) : null,
-    seller: row.seller ? String(row.seller) : null,
-    documents: row.documents ? String(row.documents) : null,
-    rawJson: row.raw_json ? String(row.raw_json) : null,
-    errorText: row.error_text ? String(row.error_text) : null,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-  };
 }
 
 function lotListSortValue(row: LotRow): number {
@@ -568,158 +459,120 @@ function formatBlacklistNote(
 }
 
 export class AuctionD1Store {
+  private readonly db: AuctionDb;
+
   constructor(
-    private readonly d1: D1Database,
+    d1: D1Database,
     private readonly images: R2Bucket,
-  ) {}
-
-  private bindParams(params: DbValue[]): DbValue[] {
-    return params.map((value) => (value === undefined ? null : value));
-  }
-
-  private async all<T extends Record<string, unknown>>(
-    statement: string,
-    ...params: DbValue[]
-  ): Promise<T[]> {
-    const result = await this.d1
-      .prepare(statement)
-      .bind(...this.bindParams(params))
-      .all<T>();
-    return (result.results ?? []) as T[];
-  }
-
-  private async get<T extends Record<string, unknown>>(
-    statement: string,
-    ...params: DbValue[]
-  ): Promise<T | null> {
-    const result = await this.d1
-      .prepare(statement)
-      .bind(...this.bindParams(params))
-      .first<T>();
-    return result ?? null;
-  }
-
-  private async run(statement: string, ...params: DbValue[]): Promise<number> {
-    const result = await this.d1
-      .prepare(statement)
-      .bind(...this.bindParams(params))
-      .run();
-    return Number(result.meta?.changes ?? 0);
+  ) {
+    this.db = drizzle(d1, { schema });
   }
 
   async ensureSeeded(): Promise<void> {
-    const row = await this.get<{ count: number }>("SELECT COUNT(*) AS count FROM vin_targets");
-    if (Number(row?.count ?? 0) > 0) {
-      return;
-    }
+    const [{ value }] = await this.db.select({ value: count() }).from(vinTargets);
+    if (value > 0) return;
     const now = new Date().toISOString();
-    for (const target of DEFAULT_TARGETS) {
-      await this.run(
-        `INSERT INTO vin_targets (
-          id, key, label, car_type, marker, vin_pattern, vin_prefix,
-          year_from, year_to, copart_slug, iaai_path, reject_colors_json, reject_locations_json,
-          enabled_copart, enabled_iaai, active, sort_order, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?)`,
-        crypto.randomUUID(),
-        target.key,
-        target.label,
-        target.carType,
-        target.marker,
-        target.vinPattern,
-        target.vinPrefix,
-        target.yearFrom,
-        target.yearTo,
-        target.copartSlug,
-        target.iaaiPath,
-        boolFlag(target.enabledCopart),
-        boolFlag(target.enabledIaai),
-        boolFlag(target.active),
-        target.sortOrder,
-        now,
-        now,
-      );
-    }
+    await this.db.insert(vinTargets).values(
+      DEFAULT_TARGETS.map((target) => ({
+        id: crypto.randomUUID(),
+        key: target.key,
+        label: target.label,
+        carType: target.carType,
+        marker: target.marker,
+        vinPattern: target.vinPattern,
+        vinPrefix: target.vinPrefix,
+        yearFrom: target.yearFrom,
+        yearTo: target.yearTo,
+        copartSlug: target.copartSlug,
+        iaaiPath: target.iaaiPath,
+        rejectColorsJson: "[]",
+        rejectLocationsJson: "[]",
+        enabledCopart: target.enabledCopart,
+        enabledIaai: target.enabledIaai,
+        active: target.active,
+        sortOrder: target.sortOrder,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    );
   }
 
   async getVinTargets(activeOnly = false): Promise<VinTarget[]> {
-    const sql = activeOnly
-      ? "SELECT * FROM vin_targets WHERE active = 1 ORDER BY sort_order, key"
-      : "SELECT * FROM vin_targets ORDER BY sort_order, key";
-    return (await this.all(sql)).map(mapVinTarget);
+    const rows = await this.db
+      .select()
+      .from(vinTargets)
+      .where(activeOnly ? eq(vinTargets.active, true) : undefined)
+      .orderBy(asc(vinTargets.sortOrder), asc(vinTargets.key));
+    return rows.map(toVinTarget);
   }
 
   async getScrapeConfig(): Promise<{ configVersion: string; targets: VinTarget[] }> {
-    const row = await this.get<{ updated_at?: string | null }>(
-      "SELECT MAX(updated_at) AS updated_at FROM vin_targets WHERE active = 1",
-    );
+    const [row] = await this.db
+      .select({ updatedAt: max(vinTargets.updatedAt) })
+      .from(vinTargets)
+      .where(eq(vinTargets.active, true));
     return {
-      configVersion: String(row?.updated_at ?? new Date().toISOString()),
+      configVersion: row?.updatedAt ?? new Date().toISOString(),
       targets: await this.getVinTargets(true),
     };
   }
 
   async getRecentSyncRuns(limit = 20): Promise<Array<Record<string, unknown>>> {
-    const rows = await this.all(
-      `SELECT id, runner_id, runner_version, machine_name, submitted_at, started_at, completed_at,
-              status, source_keys_json, covered_scopes_json, records_received, records_upserted,
-              records_missing_marked, error_text
-       FROM sync_runs
-       ORDER BY COALESCE(completed_at, submitted_at) DESC
-       LIMIT ?`,
-      Math.max(1, Math.min(100, Number(limit) || 20)),
-    );
+    const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const rows = await this.db
+      .select()
+      .from(syncRuns)
+      .orderBy(desc(sql`COALESCE(${syncRuns.completedAt}, ${syncRuns.submittedAt})`))
+      .limit(boundedLimit);
     return rows.map((row) => {
       let sourceKeys: unknown = [];
       let scopes: unknown = [];
       try {
-        sourceKeys = JSON.parse(String(row.source_keys_json ?? "[]"));
+        sourceKeys = JSON.parse(row.sourceKeysJson);
       } catch {
         sourceKeys = [];
       }
       try {
-        scopes = JSON.parse(String(row.covered_scopes_json ?? "[]"));
+        scopes = JSON.parse(row.coveredScopesJson);
       } catch {
         scopes = [];
       }
       return {
         id: row.id,
-        runnerId: row.runner_id,
-        runnerVersion: row.runner_version,
-        machineName: row.machine_name,
-        submittedAt: row.submitted_at,
-        startedAt: row.started_at,
-        completedAt: row.completed_at,
+        runnerId: row.runnerId,
+        runnerVersion: row.runnerVersion,
+        machineName: row.machineName,
+        submittedAt: row.submittedAt,
+        startedAt: row.startedAt,
+        completedAt: row.completedAt,
         status: row.status,
         sourceKeys,
         scopes,
-        recordsReceived: Number(row.records_received ?? 0),
-        recordsUpserted: Number(row.records_upserted ?? 0),
-        recordsMissingMarked: Number(row.records_missing_marked ?? 0),
-        errorText: row.error_text,
+        recordsReceived: row.recordsReceived,
+        recordsUpserted: row.recordsUpserted,
+        recordsMissingMarked: row.recordsMissingMarked,
+        errorText: row.errorText,
       };
     });
   }
 
   async getLatestCollectorIngestAt(): Promise<string | null> {
-    const runRow = await this.get<{ ingested_at?: string | null }>(`
-      SELECT MAX(COALESCE(completed_at, started_at, submitted_at)) AS ingested_at
-      FROM sync_runs
-      WHERE status = 'complete'
-    `);
-    if (runRow?.ingested_at) {
-      return String(runRow.ingested_at);
-    }
-    const lotRow = await this.get<{ ingested_at?: string | null }>(
-      "SELECT MAX(last_ingested_at) AS ingested_at FROM lots",
-    );
-    return lotRow?.ingested_at ? String(lotRow.ingested_at) : null;
+    const [runRow] = await this.db
+      .select({
+        ingestedAt: max(
+          sql<string>`COALESCE(${syncRuns.completedAt}, ${syncRuns.startedAt}, ${syncRuns.submittedAt})`,
+        ),
+      })
+      .from(syncRuns)
+      .where(eq(syncRuns.status, "complete"));
+    if (runRow?.ingestedAt) return runRow.ingestedAt;
+    const [lotRow] = await this.db.select({ ingestedAt: max(lots.lastIngestedAt) }).from(lots);
+    return lotRow?.ingestedAt ?? null;
   }
 
   private async getNextVinTargetSortOrder(): Promise<number> {
-    const row = await this.get<{ sort_order?: number | null }>(
-      "SELECT COALESCE(MAX(sort_order), 0) AS sort_order FROM vin_targets",
-    );
-    return Number(row?.sort_order ?? 0) + 10;
+    const [row] = await this.db.select({ value: max(vinTargets.sortOrder) }).from(vinTargets);
+    return (row?.value ?? 0) + 10;
   }
 
   async upsertVinTarget(input: Partial<VinTarget> & { vinPattern: string }): Promise<string> {
@@ -727,12 +580,12 @@ export class AuctionD1Store {
     if (validationError) throw new Error(validationError);
     const inferred = inferVinTargetDefinition(input.vinPattern);
     if (!inferred.vinPattern) throw new Error("VIN pattern is required.");
-    const existingRow = await this.get(
-      "SELECT * FROM vin_targets WHERE id = ? OR key = ? LIMIT 1",
-      input.id ?? "",
-      input.key ?? inferred.key,
-    );
-    const existing = existingRow ? mapVinTarget(existingRow) : null;
+    const [existingRow] = await this.db
+      .select()
+      .from(vinTargets)
+      .where(or(eq(vinTargets.id, input.id ?? ""), eq(vinTargets.key, input.key ?? inferred.key)))
+      .limit(1);
+    const existing = existingRow ? toVinTarget(existingRow) : null;
     const generic = buildGenericTargetMetadata(inferred.vinPattern);
     const keepExistingMetadata = existing ? !isGenericVinTargetMetadata(existing) : false;
     const inferredMarker = inferred.modelLabel
@@ -779,9 +632,33 @@ export class AuctionD1Store {
     const iaaiPath =
       input.iaaiPath ??
       (isDeterministicTesla ? inferred.iaaiPath : inferred.iaaiPath || existing?.iaaiPath || "");
-    const next = {
-      id: input.id ?? (existing ? existing.id : crypto.randomUUID()),
-      key: input.key ?? (existing ? existing.key : inferred.key),
+    const rejectColors = normalizeStringList(input.rejectColors ?? existing?.rejectColors ?? []);
+    const rejectLocations = normalizeStringList(
+      input.rejectLocations ?? existing?.rejectLocations ?? [],
+    );
+    const enabledCopart = input.enabledCopart ?? (existing ? existing.enabledCopart : true);
+    const enabledIaai =
+      input.enabledIaai ??
+      (existing
+        ? existing.enabledIaai
+        : !isGenericVinTargetMetadata({
+            label,
+            carType,
+            marker,
+            vinPattern: inferred.vinPattern,
+            vinPrefix: inferred.vinPrefix,
+            copartSlug,
+            iaaiPath,
+          }));
+    const active = input.active ?? (existing ? existing.active : true);
+    const sortOrder =
+      input.sortOrder ?? (existing ? existing.sortOrder : await this.getNextVinTargetSortOrder());
+    const id = input.id ?? (existing ? existing.id : crypto.randomUUID());
+    const key = input.key ?? (existing ? existing.key : inferred.key);
+
+    const values = {
+      id,
+      key,
       label,
       carType,
       marker,
@@ -791,114 +668,81 @@ export class AuctionD1Store {
       yearTo,
       copartSlug,
       iaaiPath,
-      rejectColors: normalizeStringList(input.rejectColors ?? existing?.rejectColors ?? []),
-      rejectLocations: normalizeStringList(
-        input.rejectLocations ?? existing?.rejectLocations ?? [],
-      ),
-      enabledCopart: input.enabledCopart ?? (existing ? existing.enabledCopart : true),
-      enabledIaai:
-        input.enabledIaai ??
-        (existing
-          ? existing.enabledIaai
-          : !isGenericVinTargetMetadata({
-              label,
-              carType,
-              marker,
-              vinPattern: inferred.vinPattern,
-              vinPrefix: inferred.vinPrefix,
-              copartSlug,
-              iaaiPath,
-            })),
-      active: input.active ?? (existing ? existing.active : true),
-      sortOrder:
-        input.sortOrder ?? (existing ? existing.sortOrder : await this.getNextVinTargetSortOrder()),
+      rejectColorsJson: JSON.stringify(rejectColors),
+      rejectLocationsJson: JSON.stringify(rejectLocations),
+      enabledCopart,
+      enabledIaai,
+      active,
+      sortOrder,
       createdAt: existing ? existing.createdAt : now,
       updatedAt: now,
     };
 
-    await this.run(
-      `INSERT INTO vin_targets (
-        id, key, label, car_type, marker, vin_pattern, vin_prefix,
-        year_from, year_to, copart_slug, iaai_path, reject_colors_json, reject_locations_json,
-        enabled_copart, enabled_iaai, active, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        key = excluded.key,
-        label = excluded.label,
-        car_type = excluded.car_type,
-        marker = excluded.marker,
-        vin_pattern = excluded.vin_pattern,
-        vin_prefix = excluded.vin_prefix,
-        year_from = excluded.year_from,
-        year_to = excluded.year_to,
-        copart_slug = excluded.copart_slug,
-        iaai_path = excluded.iaai_path,
-        reject_colors_json = excluded.reject_colors_json,
-        reject_locations_json = excluded.reject_locations_json,
-        enabled_copart = excluded.enabled_copart,
-        enabled_iaai = excluded.enabled_iaai,
-        active = excluded.active,
-        sort_order = excluded.sort_order,
-        updated_at = excluded.updated_at`,
-      next.id,
-      next.key,
-      next.label,
-      next.carType,
-      next.marker,
-      next.vinPattern,
-      next.vinPrefix,
-      next.yearFrom,
-      next.yearTo,
-      next.copartSlug,
-      next.iaaiPath,
-      JSON.stringify(next.rejectColors),
-      JSON.stringify(next.rejectLocations),
-      boolFlag(next.enabledCopart),
-      boolFlag(next.enabledIaai),
-      boolFlag(next.active),
-      next.sortOrder,
-      next.createdAt,
-      next.updatedAt,
-    );
-    return next.id;
+    await this.db
+      .insert(vinTargets)
+      .values(values)
+      .onConflictDoUpdate({
+        target: vinTargets.id,
+        set: {
+          key: values.key,
+          label: values.label,
+          carType: values.carType,
+          marker: values.marker,
+          vinPattern: values.vinPattern,
+          vinPrefix: values.vinPrefix,
+          yearFrom: values.yearFrom,
+          yearTo: values.yearTo,
+          copartSlug: values.copartSlug,
+          iaaiPath: values.iaaiPath,
+          rejectColorsJson: values.rejectColorsJson,
+          rejectLocationsJson: values.rejectLocationsJson,
+          enabledCopart: values.enabledCopart,
+          enabledIaai: values.enabledIaai,
+          active: values.active,
+          sortOrder: values.sortOrder,
+          updatedAt: values.updatedAt,
+        },
+      });
+    return id;
   }
 
   async removeVinTarget(id: string): Promise<void> {
-    const changes = await this.run("DELETE FROM vin_targets WHERE id = ?", id);
-    if (changes === 0) {
+    const deleted = await this.db
+      .delete(vinTargets)
+      .where(eq(vinTargets.id, id))
+      .returning({ id: vinTargets.id });
+    if (!deleted.length) {
       throw new Error("Target not found.");
     }
   }
 
   async getLotList(includeRemoved = false): Promise<LotListItem[]> {
-    const rows = await this.all(
-      `
-      SELECT
-        l.*,
-        (
-          SELECT li.id
-          FROM lot_images li
-          WHERE li.lot_id = l.id AND li.active = 1
-          ORDER BY li.sort_order, li.created_at
-          LIMIT 1
-        ) AS primary_image_id,
-        (
-          SELECT COUNT(*)
-          FROM lot_images li
-          WHERE li.lot_id = l.id AND li.active = 1
-        ) AS image_count
-      FROM lots l
-      WHERE (? = 1 OR l.workflow_state != 'removed')
-      ORDER BY l.updated_at DESC
-    `,
-      boolFlag(includeRemoved),
-    );
+    const primaryImageId = sql<string | null>`(
+      SELECT ${lotImages.id} FROM ${lotImages}
+      WHERE ${lotImages.lotId} = ${lots.id} AND ${lotImages.active} = 1
+      ORDER BY ${lotImages.sortOrder}, ${lotImages.createdAt}
+      LIMIT 1
+    )`;
+    const imageCount = sql<number>`(
+      SELECT COUNT(*) FROM ${lotImages}
+      WHERE ${lotImages.lotId} = ${lots.id} AND ${lotImages.active} = 1
+    )`.mapWith(Number);
+
+    const rows = await this.db
+      .select({
+        ...getTableColumns(lots),
+        primaryImageId,
+        imageCount,
+      })
+      .from(lots)
+      .where(includeRemoved ? undefined : ne(lots.workflowState, "removed"))
+      .orderBy(desc(lots.updatedAt));
 
     return rows
       .map((row) => ({
-        ...mapLotRow(row),
-        primaryImageId: row.primary_image_id ? String(row.primary_image_id) : null,
-        imageCount: Number(row.image_count ?? 0),
+        ...toLotRow(row),
+        primaryImageId: row.primaryImageId,
+        imageCount: row.imageCount,
       }))
       .sort(
         (left, right) =>
@@ -923,64 +767,61 @@ export class AuctionD1Store {
   }
 
   async getLotDetail(sourceKey: SourceKey, lotNumber: string): Promise<LotDetail | null> {
-    const lotRow = await this.get(
-      "SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1",
-      sourceKey,
-      lotNumber,
-    );
+    const [lotRow] = await this.db
+      .select()
+      .from(lots)
+      .where(and(eq(lots.sourceKey, sourceKey), eq(lots.lotNumber, lotNumber)))
+      .limit(1);
     if (!lotRow) return null;
-    const lot = mapLotRow(lotRow);
-    const images = (
-      await this.all(
-        "SELECT * FROM lot_images WHERE lot_id = ? AND active = 1 ORDER BY sort_order, created_at",
-        lot.id,
+    const lot = toLotRow(lotRow);
+    const [images, snapshots, actions, soldPriceRow] = await Promise.all([
+      this.db
+        .select()
+        .from(lotImages)
+        .where(and(eq(lotImages.lotId, lot.id), eq(lotImages.active, true)))
+        .orderBy(asc(lotImages.sortOrder), asc(lotImages.createdAt)),
+      this.db
+        .select()
+        .from(lotSnapshots)
+        .where(eq(lotSnapshots.lotId, lot.id))
+        .orderBy(desc(lotSnapshots.observedAt)),
+      this.db
+        .select()
+        .from(lotActions)
+        .where(eq(lotActions.lotId, lot.id))
+        .orderBy(desc(lotActions.createdAt)),
+      this.db
+        .select()
+        .from(lotSoldPrices)
+        .where(eq(lotSoldPrices.lotId, lot.id))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+    ]);
+    return { lot, images, snapshots, actions, soldPrice: soldPriceRow };
+  }
+
+  async getImageRow(imageId: string) {
+    const [row] = await this.db.select().from(lotImages).where(eq(lotImages.id, imageId)).limit(1);
+    return row ?? null;
+  }
+
+  async getLotImageSyncState(sourceKey: SourceKey, lotNumber: string) {
+    const [row] = await this.db
+      .select(getTableColumns(lotImages))
+      .from(lotImages)
+      .innerJoin(lots, eq(lots.id, lotImages.lotId))
+      .where(
+        and(
+          eq(lots.sourceKey, sourceKey),
+          eq(lots.lotNumber, lotNumber),
+          eq(lotImages.active, true),
+        ),
       )
-    ).map(mapLotImage);
-    const snapshots = (
-      await this.all(
-        "SELECT * FROM lot_snapshots WHERE lot_id = ? ORDER BY observed_at DESC",
-        lot.id,
-      )
-    ).map(mapLotSnapshot);
-    const actions = (
-      await this.all("SELECT * FROM lot_actions WHERE lot_id = ? ORDER BY created_at DESC", lot.id)
-    ).map(mapLotAction);
-    const soldPriceRow = await this.get(
-      "SELECT * FROM lot_sold_prices WHERE lot_id = ? LIMIT 1",
-      lot.id,
-    );
-    return {
-      lot,
-      images,
-      snapshots,
-      actions,
-      soldPrice: soldPriceRow ? mapSoldPrice(soldPriceRow) : null,
-    };
+      .limit(1);
+    return row ?? null;
   }
 
-  async getImageRow(imageId: string): Promise<LotImageRow | null> {
-    const row = await this.get("SELECT * FROM lot_images WHERE id = ? LIMIT 1", imageId);
-    return row ? mapLotImage(row) : null;
-  }
-
-  async getLotImageSyncState(sourceKey: SourceKey, lotNumber: string): Promise<LotImageRow | null> {
-    const row = await this.get(
-      `
-      SELECT li.*
-      FROM lot_images li
-      INNER JOIN lots l ON l.id = li.lot_id
-      WHERE l.source_key = ? AND l.lot_number = ? AND li.active = 1
-      LIMIT 1
-    `,
-      sourceKey,
-      lotNumber,
-    );
-    return row ? mapLotImage(row) : null;
-  }
-
-  async getImageObject(
-    imageId: string,
-  ): Promise<{ image: LotImageRow; object: R2ObjectBody } | null> {
+  async getImageObject(imageId: string) {
     const image = await this.getImageRow(imageId);
     if (!image) return null;
     const object = await this.images.get(image.storagePath);
@@ -994,53 +835,42 @@ export class AuctionD1Store {
     note: string | null,
   ): Promise<void> {
     const now = new Date().toISOString();
-    const lotRow = await this.get("SELECT * FROM lots WHERE id = ? LIMIT 1", lotId);
+    const [lotRow] = await this.db.select().from(lots).where(eq(lots.id, lotId)).limit(1);
     if (!lotRow) throw new Error(`Unknown lot ${lotId}`);
     const approvedAt =
-      workflowState === "approved"
-        ? now
-        : workflowState === "removed"
-          ? lotRow.approved_at
-            ? String(lotRow.approved_at)
-            : null
-          : null;
+      workflowState === "approved" ? now : workflowState === "removed" ? lotRow.approvedAt : null;
     const removedAt = workflowState === "removed" ? now : null;
-    await this.run(
-      `UPDATE lots
-       SET workflow_state = ?, workflow_note = ?, approved_at = ?, removed_at = ?, updated_at = ?
-       WHERE id = ?`,
-      workflowState,
-      note,
-      approvedAt,
-      removedAt,
-      now,
+    await this.db
+      .update(lots)
+      .set({ workflowState, workflowNote: note, approvedAt, removedAt, updatedAt: now })
+      .where(eq(lots.id, lotId));
+    await this.db.insert(lotActions).values({
+      id: crypto.randomUUID(),
       lotId,
-    );
-    await this.run(
-      `INSERT INTO lot_actions (id, lot_id, action, actor, note, metadata_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      crypto.randomUUID(),
-      lotId,
-      workflowState,
+      action: workflowState,
       actor,
       note,
-      null,
-      now,
-    );
+      metadataJson: null,
+      createdAt: now,
+    });
   }
 
   async hardDeleteLot(lotId: string): Promise<boolean> {
-    const lotRow = await this.get("SELECT id FROM lots WHERE id = ? LIMIT 1", lotId);
-    if (!lotRow) return false;
-    const imageRows = await this.all<{ storage_path: string | null }>(
-      "SELECT storage_path FROM lot_images WHERE lot_id = ?",
-      lotId,
-    );
-    await this.run("DELETE FROM lot_notification_log WHERE lot_id = ?", lotId);
-    await this.run("DELETE FROM lots WHERE id = ?", lotId);
+    const [exists] = await this.db
+      .select({ id: lots.id })
+      .from(lots)
+      .where(eq(lots.id, lotId))
+      .limit(1);
+    if (!exists) return false;
+    const imageRows = await this.db
+      .select({ storagePath: lotImages.storagePath })
+      .from(lotImages)
+      .where(eq(lotImages.lotId, lotId));
+    await this.db.delete(lotNotificationLog).where(eq(lotNotificationLog.lotId, lotId));
+    await this.db.delete(lots).where(eq(lots.id, lotId));
     await Promise.allSettled(
       imageRows.map((row) =>
-        row.storage_path ? this.images.delete(row.storage_path) : Promise.resolve(),
+        row.storagePath ? this.images.delete(row.storagePath) : Promise.resolve(),
       ),
     );
     return true;
@@ -1048,24 +878,29 @@ export class AuctionD1Store {
 
   private async markTimedOutLotsDone(nowIso: string): Promise<number> {
     const cutoffIso = new Date(Date.parse(nowIso) - SOLD_TIMEOUT_MS).toISOString();
-    return await this.run(
-      `UPDATE lots
-       SET status = 'done', updated_at = ?
-       WHERE workflow_state != 'removed'
-         AND status IN ('upcoming', 'unknown', 'missing')
-         AND auction_date LIKE '%T%'
-         AND datetime(auction_date) <= datetime(?)`,
-      nowIso,
-      cutoffIso,
-    );
+    const updated = await this.db
+      .update(lots)
+      .set({ status: "done", updatedAt: nowIso })
+      .where(
+        and(
+          ne(lots.workflowState, "removed"),
+          inArray(lots.status, ["upcoming", "unknown", "missing"]),
+          like(lots.auctionDate, "%T%"),
+          sql`datetime(${lots.auctionDate}) <= datetime(${cutoffIso})`,
+        ),
+      )
+      .returning({ id: lots.id });
+    return updated.length;
   }
 
   async getSoldPriceQueue(limit = 20): Promise<SoldPriceQueueItem[]> {
     const nowIso = new Date().toISOString();
     const nowMs = Date.parse(nowIso);
     const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 20));
-    const soldPriceRows = (await this.all("SELECT * FROM lot_sold_prices")).map(mapSoldPrice);
-    const soldPriceByLotId = new Map(soldPriceRows.map((row) => [row.lotId, row]));
+    const soldPriceRows = await this.db.select().from(lotSoldPrices);
+    const soldPriceByLotId = new Map<string, SoldPriceRecord>(
+      soldPriceRows.map((row) => [row.lotId, row]),
+    );
     return (await this.getPublicLotList())
       .filter((lot) => {
         if (lot.workflowState === "removed") return false;
@@ -1129,13 +964,17 @@ export class AuctionD1Store {
   }
 
   private async recordSoldPriceResult(input: SoldPriceResultInput): Promise<boolean> {
-    const lotRow = await this.get("SELECT id FROM lots WHERE id = ? LIMIT 1", input.lotId);
-    if (!lotRow) return false;
-    const existingRow = await this.get(
-      "SELECT * FROM lot_sold_prices WHERE lot_id = ? LIMIT 1",
-      input.lotId,
-    );
-    const existing = existingRow ? mapSoldPrice(existingRow) : null;
+    const [lotExists] = await this.db
+      .select({ id: lots.id })
+      .from(lots)
+      .where(eq(lots.id, input.lotId))
+      .limit(1);
+    if (!lotExists) return false;
+    const [existing] = await this.db
+      .select()
+      .from(lotSoldPrices)
+      .where(eq(lotSoldPrices.lotId, input.lotId))
+      .limit(1);
     const now = new Date().toISOString();
     const nextAttemptCount = (existing?.attemptCount ?? 0) + 1;
     const requestedStatus = normalizeSoldPriceLookupStatus(input.lookupStatus);
@@ -1146,17 +985,17 @@ export class AuctionD1Store {
         : requestedStatus;
     const nextAttemptAt = getNextSoldPriceAttemptAt(lookupStatus, nextAttemptCount, now);
     const errorText = normalizedTextOrNull(input.errorText);
+
     if (existing?.lookupStatus === "found" && lookupStatus !== "found") {
-      await this.run(
-        `UPDATE lot_sold_prices
-         SET attempt_count = ?, last_attempted_at = ?, error_text = COALESCE(?, error_text), updated_at = ?
-         WHERE lot_id = ?`,
-        nextAttemptCount,
-        now,
-        errorText,
-        now,
-        input.lotId,
-      );
+      await this.db
+        .update(lotSoldPrices)
+        .set({
+          attemptCount: nextAttemptCount,
+          lastAttemptedAt: now,
+          errorText: sql`COALESCE(${errorText}, ${lotSoldPrices.errorText})`,
+          updatedAt: now,
+        })
+        .where(eq(lotSoldPrices.lotId, input.lotId));
       return true;
     }
 
@@ -1172,81 +1011,82 @@ export class AuctionD1Store {
     const id = existing?.id ?? crypto.randomUUID();
     const createdAt = existing?.createdAt ?? now;
     const foundAt = lookupStatus === "found" ? (existing?.foundAt ?? now) : null;
-    await this.run(
-      `INSERT INTO lot_sold_prices (
-        id, lot_id, lookup_status, attempt_count, last_attempted_at, next_attempt_at, found_at,
-        external_url, matched_query, match_confidence, final_bid_usd, sale_date, sale_date_raw,
-        external_source_key, external_source_label, external_lot_number, external_vin,
-        condition, damage, secondary_damage, mileage, location, color, seller, documents,
-        raw_json, error_text, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(lot_id) DO UPDATE SET
-        lookup_status = excluded.lookup_status,
-        attempt_count = excluded.attempt_count,
-        last_attempted_at = excluded.last_attempted_at,
-        next_attempt_at = excluded.next_attempt_at,
-        found_at = excluded.found_at,
-        external_url = excluded.external_url,
-        matched_query = excluded.matched_query,
-        match_confidence = excluded.match_confidence,
-        final_bid_usd = excluded.final_bid_usd,
-        sale_date = excluded.sale_date,
-        sale_date_raw = excluded.sale_date_raw,
-        external_source_key = excluded.external_source_key,
-        external_source_label = excluded.external_source_label,
-        external_lot_number = excluded.external_lot_number,
-        external_vin = excluded.external_vin,
-        condition = excluded.condition,
-        damage = excluded.damage,
-        secondary_damage = excluded.secondary_damage,
-        mileage = excluded.mileage,
-        location = excluded.location,
-        color = excluded.color,
-        seller = excluded.seller,
-        documents = excluded.documents,
-        raw_json = excluded.raw_json,
-        error_text = excluded.error_text,
-        updated_at = excluded.updated_at`,
+    const isFound = lookupStatus === "found";
+
+    const values = {
       id,
-      input.lotId,
+      lotId: input.lotId,
       lookupStatus,
-      nextAttemptCount,
-      now,
+      attemptCount: nextAttemptCount,
+      lastAttemptedAt: now,
       nextAttemptAt,
       foundAt,
-      normalizedTextOrNull(input.externalUrl),
-      normalizedTextOrNull(input.matchedQuery),
+      externalUrl: normalizedTextOrNull(input.externalUrl),
+      matchedQuery: normalizedTextOrNull(input.matchedQuery),
       matchConfidence,
-      lookupStatus === "found" ? finalBidUsd : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.saleDate) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.saleDateRaw) : null,
-      lookupStatus === "found" ? externalSourceKey : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.externalSourceLabel) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.externalLotNumber) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.externalVin) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.condition) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.damage) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.secondaryDamage) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.mileage) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.location) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.color) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.seller) : null,
-      lookupStatus === "found" ? normalizedTextOrNull(input.documents) : null,
+      finalBidUsd: isFound ? finalBidUsd : null,
+      saleDate: isFound ? normalizedTextOrNull(input.saleDate) : null,
+      saleDateRaw: isFound ? normalizedTextOrNull(input.saleDateRaw) : null,
+      externalSourceKey: isFound ? externalSourceKey : null,
+      externalSourceLabel: isFound ? normalizedTextOrNull(input.externalSourceLabel) : null,
+      externalLotNumber: isFound ? normalizedTextOrNull(input.externalLotNumber) : null,
+      externalVin: isFound ? normalizedTextOrNull(input.externalVin) : null,
+      condition: isFound ? normalizedTextOrNull(input.condition) : null,
+      damage: isFound ? normalizedTextOrNull(input.damage) : null,
+      secondaryDamage: isFound ? normalizedTextOrNull(input.secondaryDamage) : null,
+      mileage: isFound ? normalizedTextOrNull(input.mileage) : null,
+      location: isFound ? normalizedTextOrNull(input.location) : null,
+      color: isFound ? normalizedTextOrNull(input.color) : null,
+      seller: isFound ? normalizedTextOrNull(input.seller) : null,
+      documents: isFound ? normalizedTextOrNull(input.documents) : null,
       rawJson,
       errorText,
       createdAt,
-      now,
-    );
+      updatedAt: now,
+    };
 
-    if (lookupStatus === "found") {
+    await this.db
+      .insert(lotSoldPrices)
+      .values(values)
+      .onConflictDoUpdate({
+        target: lotSoldPrices.lotId,
+        set: {
+          lookupStatus: values.lookupStatus,
+          attemptCount: values.attemptCount,
+          lastAttemptedAt: values.lastAttemptedAt,
+          nextAttemptAt: values.nextAttemptAt,
+          foundAt: values.foundAt,
+          externalUrl: values.externalUrl,
+          matchedQuery: values.matchedQuery,
+          matchConfidence: values.matchConfidence,
+          finalBidUsd: values.finalBidUsd,
+          saleDate: values.saleDate,
+          saleDateRaw: values.saleDateRaw,
+          externalSourceKey: values.externalSourceKey,
+          externalSourceLabel: values.externalSourceLabel,
+          externalLotNumber: values.externalLotNumber,
+          externalVin: values.externalVin,
+          condition: values.condition,
+          damage: values.damage,
+          secondaryDamage: values.secondaryDamage,
+          mileage: values.mileage,
+          location: values.location,
+          color: values.color,
+          seller: values.seller,
+          documents: values.documents,
+          rawJson: values.rawJson,
+          errorText: values.errorText,
+          updatedAt: values.updatedAt,
+        },
+      });
+
+    if (isFound) {
       const externalVin = normalizedTextOrNull(input.externalVin);
       if (externalVin && /^[A-HJ-NPR-Z0-9]{17}$/i.test(externalVin)) {
-        await this.run(
-          "UPDATE lots SET vin = ?, updated_at = ? WHERE id = ?",
-          externalVin.toUpperCase(),
-          now,
-          input.lotId,
-        );
+        await this.db
+          .update(lots)
+          .set({ vin: externalVin.toUpperCase(), updatedAt: now })
+          .where(eq(lots.id, input.lotId));
       }
     }
     return true;
@@ -1255,13 +1095,10 @@ export class AuctionD1Store {
   async getSoldPriceExplorerItems(): Promise<SoldPriceExplorerItem[]> {
     const publicLots = await this.getPublicLotList();
     const publicLotsById = new Map(publicLots.map((lot) => [lot.id, lot]));
-    const soldRows = (
-      await this.all(`
-      SELECT *
-      FROM lot_sold_prices
-      WHERE lookup_status = 'found' AND final_bid_usd IS NOT NULL
-    `)
-    ).map(mapSoldPrice);
+    const soldRows = await this.db
+      .select()
+      .from(lotSoldPrices)
+      .where(and(eq(lotSoldPrices.lookupStatus, "found"), isNotNull(lotSoldPrices.finalBidUsd)));
     const items = soldRows
       .map((soldPrice) => {
         const lot = publicLotsById.get(soldPrice.lotId);
@@ -1302,23 +1139,19 @@ export class AuctionD1Store {
     const presentKeysByScope = new Map<string, Set<string>>();
     let upserted = 0;
     let missingMarked = 0;
-    await this.run(
-      `INSERT INTO sync_runs (
-        id, runner_id, runner_version, machine_name, submitted_at, started_at, completed_at,
-        status, source_keys_json, covered_scopes_json, records_received
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      runId,
-      payload.run.runnerId,
-      payload.run.runnerVersion,
-      payload.run.machineName,
+    await this.db.insert(syncRuns).values({
+      id: runId,
+      runnerId: payload.run.runnerId,
+      runnerVersion: payload.run.runnerVersion,
+      machineName: payload.run.machineName,
       submittedAt,
-      payload.run.startedAt,
+      startedAt: payload.run.startedAt,
       completedAt,
-      "running",
-      JSON.stringify(payload.run.sourceKeys),
-      JSON.stringify(payload.run.scopes),
-      payload.records.length,
-    );
+      status: "running",
+      sourceKeysJson: JSON.stringify(payload.run.sourceKeys),
+      coveredScopesJson: JSON.stringify(payload.run.scopes),
+      recordsReceived: payload.records.length,
+    });
 
     for (const update of payload.targetUpdates ?? []) {
       await this.applyTargetMetadataUpdate(update, completedAt);
@@ -1340,16 +1173,15 @@ export class AuctionD1Store {
         presentKeysByScope.get(`${scope.sourceKey}:${scope.targetKey}`) ?? new Set(),
       );
     }
-    await this.run(
-      `UPDATE sync_runs
-       SET status = ?, records_upserted = ?, records_missing_marked = ?, completed_at = ?
-       WHERE id = ?`,
-      "complete",
-      upserted,
-      missingMarked,
-      completedAt,
-      runId,
-    );
+    await this.db
+      .update(syncRuns)
+      .set({
+        status: "complete",
+        recordsUpserted: upserted,
+        recordsMissingMarked: missingMarked,
+        completedAt,
+      })
+      .where(eq(syncRuns.id, runId));
     return { runId, upserted, missingMarked };
   }
 
@@ -1363,84 +1195,87 @@ export class AuctionD1Store {
     width?: number | null;
     height?: number | null;
     dataBase64: string;
-  }): Promise<LotImageRow> {
-    const lotRow = await this.get(
-      "SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1",
-      input.sourceKey,
-      input.lotNumber,
-    );
+  }) {
+    const [lotRow] = await this.db
+      .select({ id: lots.id })
+      .from(lots)
+      .where(and(eq(lots.sourceKey, input.sourceKey), eq(lots.lotNumber, input.lotNumber)))
+      .limit(1);
     if (!lotRow) throw new Error(`Unknown lot ${input.sourceKey}:${input.lotNumber}`);
-    const lot = mapLotRow(lotRow);
     const bytes = Uint8Array.from(atob(input.dataBase64), (char) => char.charCodeAt(0));
     const sha256 = await sha256Hex(bytes);
     const mimeType = input.mimeType || "application/octet-stream";
     const extension = extFromMimeType(mimeType);
     const storagePath = `${input.sourceKey}/${input.lotNumber}/${sha256}.${extension}`;
     const now = new Date().toISOString();
-    const existingRow = await this.get("SELECT * FROM lot_images WHERE lot_id = ? LIMIT 1", lot.id);
-    const existingImage = existingRow ? mapLotImage(existingRow) : null;
+    const [existing] = await this.db
+      .select()
+      .from(lotImages)
+      .where(eq(lotImages.lotId, lotRow.id))
+      .limit(1);
 
-    if (existingImage && existingImage.sha256 === sha256) {
+    if (existing && existing.sha256 === sha256) {
       await this.images.put(storagePath, bytes, { httpMetadata: { contentType: mimeType } });
-      await this.run(
-        `UPDATE lot_images
-         SET source_url = ?, storage_path = ?, mime_type = ?, sha256 = ?, byte_size = ?, width = ?, height = ?,
-             sort_order = 0, last_seen_at = ?, last_sync_run_id = ?, active = 1
-         WHERE id = ?`,
-        input.sourceUrl,
-        storagePath,
-        mimeType,
-        sha256,
-        bytes.length,
-        input.width ?? null,
-        input.height ?? null,
-        now,
-        input.runId,
-        existingImage.id,
-      );
-      if (existingImage.storagePath !== storagePath) {
-        await this.images.delete(existingImage.storagePath).catch(() => {});
+      await this.db
+        .update(lotImages)
+        .set({
+          sourceUrl: input.sourceUrl,
+          storagePath,
+          mimeType,
+          sha256,
+          byteSize: bytes.length,
+          width: input.width ?? null,
+          height: input.height ?? null,
+          sortOrder: 0,
+          lastSeenAt: now,
+          lastSyncRunId: input.runId,
+          active: true,
+        })
+        .where(eq(lotImages.id, existing.id));
+      if (existing.storagePath !== storagePath) {
+        await this.images.delete(existing.storagePath).catch(() => {});
       }
-      const next = await this.get("SELECT * FROM lot_images WHERE id = ?", existingImage.id);
-      return mapLotImage(next!);
+      const [next] = await this.db
+        .select()
+        .from(lotImages)
+        .where(eq(lotImages.id, existing.id))
+        .limit(1);
+      return next!;
     }
 
     if (
-      existingImage &&
-      hasProtectedImageDimensions(existingImage.width, existingImage.height) &&
+      existing &&
+      hasProtectedImageDimensions(existing.width, existing.height) &&
       !hasProtectedImageDimensions(input.width ?? null, input.height ?? null)
     ) {
-      return existingImage;
+      return existing;
     }
 
-    if (existingImage) {
-      await this.run("DELETE FROM lot_images WHERE id = ?", existingImage.id);
-      await this.images.delete(existingImage.storagePath).catch(() => {});
+    if (existing) {
+      await this.db.delete(lotImages).where(eq(lotImages.id, existing.id));
+      await this.images.delete(existing.storagePath).catch(() => {});
     }
 
     await this.images.put(storagePath, bytes, { httpMetadata: { contentType: mimeType } });
     const id = crypto.randomUUID();
-    await this.run(
-      `INSERT INTO lot_images (
-        id, lot_id, source_url, storage_path, mime_type, sha256, byte_size,
-        width, height, sort_order, created_at, last_seen_at, last_sync_run_id, active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    await this.db.insert(lotImages).values({
       id,
-      lot.id,
-      input.sourceUrl,
+      lotId: lotRow.id,
+      sourceUrl: input.sourceUrl,
       storagePath,
       mimeType,
       sha256,
-      bytes.length,
-      input.width ?? null,
-      input.height ?? null,
-      0,
-      now,
-      now,
-      input.runId,
-    );
-    const next = await this.get("SELECT * FROM lot_images WHERE id = ?", id);
-    return mapLotImage(next!);
+      byteSize: bytes.length,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      sortOrder: 0,
+      createdAt: now,
+      lastSeenAt: now,
+      lastSyncRunId: input.runId,
+      active: true,
+    });
+    const [next] = await this.db.select().from(lotImages).where(eq(lotImages.id, id)).limit(1);
+    return next!;
   }
 
   private async applyTargetMetadataUpdate(
@@ -1448,12 +1283,13 @@ export class AuctionD1Store {
     observedAt: string,
   ): Promise<boolean> {
     if (!update.targetKey) return false;
-    const existingRow = await this.get(
-      "SELECT * FROM vin_targets WHERE key = ? LIMIT 1",
-      update.targetKey,
-    );
+    const [existingRow] = await this.db
+      .select()
+      .from(vinTargets)
+      .where(eq(vinTargets.key, update.targetKey))
+      .limit(1);
     if (!existingRow) return false;
-    const existing = mapVinTarget(existingRow);
+    const existing = toVinTarget(existingRow);
     const nextLabel = update.label?.trim();
     const nextCarType = update.carType?.trim();
     const nextMarker = update.marker?.trim();
@@ -1464,29 +1300,33 @@ export class AuctionD1Store {
     const shouldReplaceYears =
       hasGenericVinTargetYearRange(existing) && nextYearFrom != null && nextYearTo != null;
     if (!shouldReplaceMetadata && !shouldReplaceYears) return false;
-    const changes = await this.run(
-      `UPDATE vin_targets
-       SET label = ?, car_type = ?, marker = ?, year_from = ?, year_to = ?, enabled_iaai = ?, updated_at = ?
-       WHERE id = ?`,
-      shouldReplaceMetadata ? nextLabel : existing.label,
-      shouldReplaceMetadata ? nextCarType : existing.carType,
-      shouldReplaceMetadata ? nextMarker : existing.marker,
-      shouldReplaceYears ? nextYearFrom : existing.yearFrom,
-      shouldReplaceYears ? nextYearTo : existing.yearTo,
-      shouldReplaceMetadata ? 1 : boolFlag(existing.enabledIaai),
-      observedAt,
-      existing.id,
-    );
-    return changes > 0;
+    const updated = await this.db
+      .update(vinTargets)
+      .set({
+        label: shouldReplaceMetadata ? nextLabel! : existing.label,
+        carType: shouldReplaceMetadata ? nextCarType! : existing.carType,
+        marker: shouldReplaceMetadata ? nextMarker! : existing.marker,
+        yearFrom: shouldReplaceYears ? nextYearFrom! : existing.yearFrom,
+        yearTo: shouldReplaceYears ? nextYearTo! : existing.yearTo,
+        enabledIaai: shouldReplaceMetadata ? true : existing.enabledIaai,
+        updatedAt: observedAt,
+      })
+      .where(eq(vinTargets.id, existing.id))
+      .returning({ id: vinTargets.id });
+    return updated.length > 0;
   }
 
   private async getResolvedTargetMetadata(
     targetKey: string | null | undefined,
   ): Promise<Pick<VinTarget, "carType" | "marker"> | null> {
     if (!targetKey) return null;
-    const row = await this.get("SELECT * FROM vin_targets WHERE key = ? LIMIT 1", targetKey);
+    const [row] = await this.db
+      .select()
+      .from(vinTargets)
+      .where(eq(vinTargets.key, targetKey))
+      .limit(1);
     if (!row) return null;
-    const target = mapVinTarget(row);
+    const target = toVinTarget(row);
     return isGenericVinTargetMetadata(target)
       ? null
       : { carType: target.carType, marker: target.marker };
@@ -1497,15 +1337,15 @@ export class AuctionD1Store {
     observedAt: string,
     record: ScrapedLotRecord,
   ): Promise<void> {
-    const existing = await this.get(
-      "SELECT * FROM lots WHERE source_key = ? AND lot_number = ? LIMIT 1",
-      record.sourceKey,
-      record.lotNumber,
-    );
+    const [existing] = await this.db
+      .select()
+      .from(lots)
+      .where(and(eq(lots.sourceKey, record.sourceKey), eq(lots.lotNumber, record.lotNumber)))
+      .limit(1);
     const resolvedTarget = await this.getResolvedTargetMetadata(record.targetKey);
     const nextStatus = normalizeLotStatus(record.status);
     if (existing) {
-      const current = mapLotRow(existing);
+      const current = toLotRow(existing);
       const mergedStatus = shouldPreserveKnownLotStatus(nextStatus, current.status)
         ? current.status
         : nextStatus;
@@ -1530,40 +1370,36 @@ export class AuctionD1Store {
       const mergedEvidence = preferredText(record.evidence, current.evidence);
       const mergedColor = preferredText(record.color, current.color);
       const mergedSourceRawJson = serializeJsonOrNull(record.sourceRaw) ?? current.sourceRawJson;
-      await this.run(
-        `UPDATE lots
-         SET source_label = ?, target_key = ?, source_detail_id = ?, car_type = ?, marker = ?,
-             vin_pattern = ?, vin = ?, model_year = ?, year_page = ?, status = ?,
-             auction_date = ?, auction_date_raw = ?, location = ?, url = ?, evidence = ?, color = ?,
-             source_raw_json = ?, last_seen_at = ?, last_ingested_at = ?, last_sync_run_id = ?,
-             missing_since = NULL, missing_count = 0,
-             canceled_at = CASE WHEN ? IN ('upcoming', 'done', 'unknown') THEN NULL ELSE canceled_at END,
-             updated_at = ?
-         WHERE id = ?`,
-        mergedSourceLabel,
-        mergedTargetKey,
-        mergedSourceDetailId,
-        mergedCarType,
-        mergedMarker,
-        mergedVinPattern,
-        mergedVin,
-        mergedModelYear,
-        mergedYearPage,
-        mergedStatus,
-        mergedAuctionDate,
-        mergedAuctionDateRaw,
-        mergedLocation,
-        mergedUrl,
-        mergedEvidence,
-        mergedColor,
-        mergedSourceRawJson,
-        observedAt,
-        observedAt,
-        runId,
-        mergedStatus,
-        observedAt,
-        current.id,
-      );
+      const clearsCanceled = ["upcoming", "done", "unknown"].includes(mergedStatus);
+      await this.db
+        .update(lots)
+        .set({
+          sourceLabel: mergedSourceLabel,
+          targetKey: mergedTargetKey,
+          sourceDetailId: mergedSourceDetailId,
+          carType: mergedCarType,
+          marker: mergedMarker,
+          vinPattern: mergedVinPattern,
+          vin: mergedVin,
+          modelYear: mergedModelYear,
+          yearPage: mergedYearPage,
+          status: mergedStatus,
+          auctionDate: mergedAuctionDate,
+          auctionDateRaw: mergedAuctionDateRaw,
+          location: mergedLocation,
+          url: mergedUrl,
+          evidence: mergedEvidence,
+          color: mergedColor,
+          sourceRawJson: mergedSourceRawJson,
+          lastSeenAt: observedAt,
+          lastIngestedAt: observedAt,
+          lastSyncRunId: runId,
+          missingSince: null,
+          missingCount: 0,
+          canceledAt: clearsCanceled ? null : current.canceledAt,
+          updatedAt: observedAt,
+        })
+        .where(eq(lots.id, current.id));
       await this.insertSnapshot(current.id, runId, observedAt, true, record);
       return;
     }
@@ -1575,40 +1411,41 @@ export class AuctionD1Store {
       preferredText(resolvedTarget?.marker || record.marker, null) ||
       normalizeWhitespace(record.marker);
     const id = crypto.randomUUID();
-    await this.run(
-      `INSERT INTO lots (
-        id, source_key, source_label, target_key, lot_number, source_detail_id,
-        car_type, marker, vin_pattern, vin, model_year, year_page, status,
-        workflow_state, workflow_note, auction_date, auction_date_raw, location,
-        url, evidence, color, source_raw_json, first_seen_at, last_seen_at, last_ingested_at, last_sync_run_id,
-        missing_since, missing_count, canceled_at, approved_at, removed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, NULL, ?)`,
+    await this.db.insert(lots).values({
       id,
-      record.sourceKey,
-      preferredText(record.sourceLabel, null) || normalizeSourceLabel(record.sourceKey),
-      preferredText(record.targetKey, null),
-      record.lotNumber,
-      preferredText(record.sourceDetailId, null),
-      resolvedCarType,
-      resolvedMarker,
-      preferredText(record.vinPattern, null),
-      preferredText(record.vin, null),
-      preferredNumber(record.modelYear, null),
-      preferredNumber(record.yearPage, null),
-      nextStatus,
-      preferredText(record.auctionDate, null),
-      preferredText(record.auctionDateRaw, null),
-      preferredText(record.location, null),
-      preferredText(record.url, null) || "",
-      preferredText(record.evidence, null),
-      preferredText(record.color, null),
-      serializeJsonOrNull(record.sourceRaw),
-      observedAt,
-      observedAt,
-      observedAt,
-      runId,
-      observedAt,
-    );
+      sourceKey: record.sourceKey,
+      sourceLabel:
+        preferredText(record.sourceLabel, null) || normalizeSourceLabel(record.sourceKey),
+      targetKey: preferredText(record.targetKey, null),
+      lotNumber: record.lotNumber,
+      sourceDetailId: preferredText(record.sourceDetailId, null),
+      carType: resolvedCarType,
+      marker: resolvedMarker,
+      vinPattern: preferredText(record.vinPattern, null),
+      vin: preferredText(record.vin, null),
+      modelYear: preferredNumber(record.modelYear, null),
+      yearPage: preferredNumber(record.yearPage, null),
+      status: nextStatus,
+      workflowState: "new",
+      workflowNote: null,
+      auctionDate: preferredText(record.auctionDate, null),
+      auctionDateRaw: preferredText(record.auctionDateRaw, null),
+      location: preferredText(record.location, null),
+      url: preferredText(record.url, null) || "",
+      evidence: preferredText(record.evidence, null),
+      color: preferredText(record.color, null),
+      sourceRawJson: serializeJsonOrNull(record.sourceRaw),
+      firstSeenAt: observedAt,
+      lastSeenAt: observedAt,
+      lastIngestedAt: observedAt,
+      lastSyncRunId: runId,
+      missingSince: null,
+      missingCount: 0,
+      canceledAt: null,
+      approvedAt: null,
+      removedAt: null,
+      updatedAt: observedAt,
+    });
     await this.insertSnapshot(id, runId, observedAt, true, record);
   }
 
@@ -1619,16 +1456,15 @@ export class AuctionD1Store {
     isPresent: boolean,
     record: ScrapedLotRecord | null,
   ): Promise<void> {
-    await this.run(
-      `INSERT OR REPLACE INTO lot_snapshots (id, lot_id, sync_run_id, observed_at, is_present, snapshot_json)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      `${lotId}:${runId}:${isPresent ? "present" : "missing"}`,
-      lotId,
-      runId,
-      observedAt,
-      boolFlag(isPresent),
-      JSON.stringify(record ?? null),
-    );
+    const id = `${lotId}:${runId}:${isPresent ? "present" : "missing"}`;
+    const snapshotJson = JSON.stringify(record ?? null);
+    await this.db
+      .insert(lotSnapshots)
+      .values({ id, lotId, syncRunId: runId, observedAt, isPresent, snapshotJson })
+      .onConflictDoUpdate({
+        target: lotSnapshots.id,
+        set: { syncRunId: runId, observedAt, isPresent, snapshotJson },
+      });
   }
 
   private async reconcileMissingLots(
@@ -1637,15 +1473,14 @@ export class AuctionD1Store {
     scope: RunnerScope,
     presentLotNumbers: Set<string>,
   ): Promise<number> {
-    const existingRows = await this.all(
-      "SELECT * FROM lots WHERE source_key = ? AND target_key = ?",
-      scope.sourceKey,
-      scope.targetKey,
-    );
+    const existingRows = await this.db
+      .select()
+      .from(lots)
+      .where(and(eq(lots.sourceKey, scope.sourceKey), eq(lots.targetKey, scope.targetKey)));
     let missingMarked = 0;
     const scopeReportedZeroLots = presentLotNumbers.size === 0;
     for (const row of existingRows) {
-      const lot = mapLotRow(row);
+      const lot = toLotRow(row);
       if (presentLotNumbers.has(lot.lotNumber)) continue;
       const nextMissingCount = lot.missingCount + 1;
       const shouldGraceSingleEmptyScopeRun =
@@ -1658,22 +1493,18 @@ export class AuctionD1Store {
             : nextMissingCount >= (scopeReportedZeroLots ? 3 : 2)
               ? "canceled"
               : "missing";
-      await this.run(
-        `UPDATE lots
-         SET status = ?, missing_since = COALESCE(missing_since, ?), missing_count = ?,
-             canceled_at = CASE WHEN ? = 'canceled' THEN COALESCE(canceled_at, ?) ELSE canceled_at END,
-             last_ingested_at = ?, last_sync_run_id = ?, updated_at = ?
-         WHERE id = ?`,
-        nextStatus,
-        observedAt,
-        nextMissingCount,
-        nextStatus,
-        observedAt,
-        observedAt,
-        runId,
-        observedAt,
-        lot.id,
-      );
+      await this.db
+        .update(lots)
+        .set({
+          status: nextStatus,
+          missingSince: lot.missingSince ?? observedAt,
+          missingCount: nextMissingCount,
+          canceledAt: nextStatus === "canceled" ? (lot.canceledAt ?? observedAt) : lot.canceledAt,
+          lastIngestedAt: observedAt,
+          lastSyncRunId: runId,
+          updatedAt: observedAt,
+        })
+        .where(eq(lots.id, lot.id));
       await this.insertSnapshot(lot.id, runId, observedAt, false, null);
       missingMarked += 1;
     }
@@ -1683,9 +1514,9 @@ export class AuctionD1Store {
   async applyTargetBlacklistToExistingLots(): Promise<{ updated: number }> {
     const targets = await this.getVinTargets(true);
     const targetByKey = new Map(targets.map((target) => [target.key, target]));
-    const lots = await this.getLotList(false);
+    const list = await this.getLotList(false);
     let updated = 0;
-    for (const lot of lots) {
+    for (const lot of list) {
       if (lot.workflowState === "removed" || !lot.targetKey) continue;
       const target = targetByKey.get(lot.targetKey);
       if (!target) continue;
@@ -1703,65 +1534,73 @@ export class AuctionD1Store {
   }
 
   async savePushSubscription(endpoint: string, p256dh: string, auth: string): Promise<void> {
-    await this.run(
-      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, created_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth`,
-      crypto.randomUUID(),
-      endpoint,
-      p256dh,
-      auth,
-      new Date().toISOString(),
-    );
+    await this.db
+      .insert(pushSubscriptions)
+      .values({
+        id: crypto.randomUUID(),
+        endpoint,
+        p256dh,
+        auth,
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: { p256dh, auth },
+      });
   }
 
   async removePushSubscription(endpoint: string): Promise<void> {
-    await this.run("DELETE FROM push_subscriptions WHERE endpoint = ?", endpoint);
+    await this.db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
   }
 
-  async getPushSubscriptions(): Promise<
-    Array<{ id: string; endpoint: string; p256dh: string; auth: string }>
-  > {
-    return await this.all("SELECT id, endpoint, p256dh, auth FROM push_subscriptions");
+  async getPushSubscriptions() {
+    return await this.db
+      .select({
+        id: pushSubscriptions.id,
+        endpoint: pushSubscriptions.endpoint,
+        p256dh: pushSubscriptions.p256dh,
+        auth: pushSubscriptions.auth,
+      })
+      .from(pushSubscriptions);
   }
 
-  async getLotsToNotify12h(): Promise<
-    Array<{ id: string; lot_number: string; source_key: string; marker: string }>
-  > {
-    return await this.all(`
-      SELECT id, lot_number, source_key, marker
-      FROM lots
-      WHERE status = 'upcoming'
-        AND workflow_state != 'removed'
-        AND auction_date LIKE '%T%'
-        AND datetime(auction_date) > datetime('now')
-        AND datetime(auction_date) <= datetime('now', '+12 hours')
-        AND id NOT IN (SELECT lot_id FROM lot_notification_log WHERE event_type = 'threshold_12h')
-    `);
+  private getLotsToNotifyWithinWindow(eventType: string, sqliteOffset: string) {
+    const notified = this.db
+      .select({ lotId: lotNotificationLog.lotId })
+      .from(lotNotificationLog)
+      .where(eq(lotNotificationLog.eventType, eventType));
+    return this.db
+      .select({
+        id: lots.id,
+        lotNumber: lots.lotNumber,
+        sourceKey: lots.sourceKey,
+        marker: lots.marker,
+      })
+      .from(lots)
+      .where(
+        and(
+          eq(lots.status, "upcoming"),
+          ne(lots.workflowState, "removed"),
+          like(lots.auctionDate, "%T%"),
+          sql`datetime(${lots.auctionDate}) > datetime('now')`,
+          sql`datetime(${lots.auctionDate}) <= datetime('now', ${sqliteOffset})`,
+          notInArray(lots.id, notified),
+        ),
+      );
   }
 
-  async getLotsToNotify30m(): Promise<
-    Array<{ id: string; lot_number: string; source_key: string; marker: string }>
-  > {
-    return await this.all(`
-      SELECT id, lot_number, source_key, marker
-      FROM lots
-      WHERE status = 'upcoming'
-        AND workflow_state != 'removed'
-        AND auction_date LIKE '%T%'
-        AND datetime(auction_date) > datetime('now')
-        AND datetime(auction_date) <= datetime('now', '+30 minutes')
-        AND id NOT IN (SELECT lot_id FROM lot_notification_log WHERE event_type = 'threshold_30m')
-    `);
+  async getLotsToNotify12h() {
+    return await this.getLotsToNotifyWithinWindow("threshold_12h", "+12 hours");
+  }
+
+  async getLotsToNotify30m() {
+    return await this.getLotsToNotifyWithinWindow("threshold_30m", "+30 minutes");
   }
 
   async recordLotNotification(lotId: string, eventType: string): Promise<void> {
-    await this.run(
-      `INSERT OR IGNORE INTO lot_notification_log (lot_id, event_type, notified_at)
-       VALUES (?, ?, ?)`,
-      lotId,
-      eventType,
-      new Date().toISOString(),
-    );
+    await this.db
+      .insert(lotNotificationLog)
+      .values({ lotId, eventType, notifiedAt: new Date().toISOString() })
+      .onConflictDoNothing();
   }
 }

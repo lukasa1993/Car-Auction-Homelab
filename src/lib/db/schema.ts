@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { LotStatus, SoldPriceLookupStatus, SourceKey, WorkflowState } from "@/lib/types";
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
@@ -138,7 +139,7 @@ export const lots = sqliteTable(
   "lots",
   {
     id: text("id").primaryKey(),
-    sourceKey: text("source_key").notNull(),
+    sourceKey: text("source_key").$type<SourceKey>().notNull(),
     sourceLabel: text("source_label").notNull(),
     targetKey: text("target_key"),
     lotNumber: text("lot_number").notNull(),
@@ -149,8 +150,8 @@ export const lots = sqliteTable(
     vin: text("vin"),
     modelYear: integer("model_year"),
     yearPage: integer("year_page"),
-    status: text("status").notNull(),
-    workflowState: text("workflow_state").default("new").notNull(),
+    status: text("status").$type<LotStatus>().notNull(),
+    workflowState: text("workflow_state").$type<WorkflowState>().default("new").notNull(),
     workflowNote: text("workflow_note"),
     auctionDate: text("auction_date"),
     auctionDateRaw: text("auction_date_raw"),
@@ -268,7 +269,7 @@ export const lotSoldPrices = sqliteTable(
       .notNull()
       .unique()
       .references(() => lots.id, { onDelete: "cascade" }),
-    lookupStatus: text("lookup_status").notNull(),
+    lookupStatus: text("lookup_status").$type<SoldPriceLookupStatus>().notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
     lastAttemptedAt: text("last_attempted_at"),
     nextAttemptAt: text("next_attempt_at"),
@@ -279,7 +280,7 @@ export const lotSoldPrices = sqliteTable(
     finalBidUsd: integer("final_bid_usd"),
     saleDate: text("sale_date"),
     saleDateRaw: text("sale_date_raw"),
-    externalSourceKey: text("external_source_key"),
+    externalSourceKey: text("external_source_key").$type<SourceKey>(),
     externalSourceLabel: text("external_source_label"),
     externalLotNumber: text("external_lot_number"),
     externalVin: text("external_vin"),
