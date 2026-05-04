@@ -54,9 +54,9 @@
     "wrangler": "4.87.0"
   },
   "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest",
+    "drizzle-kit": "$drizzle-kit",
     "drizzle-orm": "$drizzle-orm",
-    "drizzle-kit": "$drizzle-kit"
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
   }
 }

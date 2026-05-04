@@ -5,7 +5,6 @@ import {
   count,
   desc,
   eq,
-  getTableColumns,
   inArray,
   isNotNull,
   like,
@@ -717,33 +716,61 @@ export class AuctionD1Store {
   }
 
   async getLotList(includeRemoved = false): Promise<LotListItem[]> {
-    const primaryImageId = sql<string | null>`(
-      SELECT ${lotImages.id} FROM ${lotImages}
-      WHERE ${lotImages.lotId} = ${lots.id} AND ${lotImages.active} = 1
-      ORDER BY ${lotImages.sortOrder}, ${lotImages.createdAt}
-      LIMIT 1
-    )`;
-    const imageCount = sql<number>`(
-      SELECT COUNT(*) FROM ${lotImages}
-      WHERE ${lotImages.lotId} = ${lots.id} AND ${lotImages.active} = 1
-    )`.mapWith(Number);
-
-    const rows = await this.db
-      .select({
-        ...getTableColumns(lots),
-        primaryImageId,
-        imageCount,
-      })
+    const lotRows = await this.db
+      .select()
       .from(lots)
       .where(includeRemoved ? undefined : ne(lots.workflowState, "removed"))
       .orderBy(desc(lots.updatedAt));
 
-    return rows
-      .map((row) => ({
-        ...toLotRow(row),
-        primaryImageId: row.primaryImageId,
-        imageCount: row.imageCount,
-      }))
+    if (lotRows.length === 0) {
+      return [];
+    }
+
+    const imageSummaryByLotId = new Map<
+      string,
+      { primaryImageId: string | null; imageCount: number }
+    >();
+
+    const lotIdChunks: string[][] = [];
+    for (let index = 0; index < lotRows.length; index += 100) {
+      lotIdChunks.push(lotRows.slice(index, index + 100).map((lot) => lot.id));
+    }
+
+    for (const lotIds of lotIdChunks) {
+      const imageRows = await this.db
+        .select({
+          id: lotImages.id,
+          lotId: lotImages.lotId,
+        })
+        .from(lotImages)
+        .where(and(inArray(lotImages.lotId, lotIds), eq(lotImages.active, true)))
+        .orderBy(asc(lotImages.lotId), asc(lotImages.sortOrder), asc(lotImages.createdAt));
+
+      for (const image of imageRows) {
+        const existing = imageSummaryByLotId.get(image.lotId);
+
+        if (existing) {
+          existing.imageCount += 1;
+          continue;
+        }
+
+        imageSummaryByLotId.set(image.lotId, {
+          primaryImageId: image.id,
+          imageCount: 1,
+        });
+      }
+    }
+
+    return lotRows
+      .map((row) => {
+        const imageSummary = imageSummaryByLotId.get(row.id);
+
+        return {
+          ...toLotRow(row),
+          primaryImageId: imageSummary?.primaryImageId ?? null,
+          imageCount: imageSummary?.imageCount ?? 0,
+        };
+      })
       .sort(
         (left, right) =>
           lotListSortValue(left) - lotListSortValue(right) ||
@@ -807,7 +834,22 @@ export class AuctionD1Store {
 
   async getLotImageSyncState(sourceKey: SourceKey, lotNumber: string) {
     const [row] = await this.db
-      .select(getTableColumns(lotImages))
+      .select({
+        id: lotImages.id,
+        lotId: lotImages.lotId,
+        sourceUrl: lotImages.sourceUrl,
+        storagePath: lotImages.storagePath,
+        mimeType: lotImages.mimeType,
+        sha256: lotImages.sha256,
+        byteSize: lotImages.byteSize,
+        width: lotImages.width,
+        height: lotImages.height,
+        sortOrder: lotImages.sortOrder,
+        createdAt: lotImages.createdAt,
+        lastSeenAt: lotImages.lastSeenAt,
+        lastSyncRunId: lotImages.lastSyncRunId,
+        active: lotImages.active,
+      })
       .from(lotImages)
       .innerJoin(lots, eq(lots.id, lotImages.lotId))
       .where(
@@ -817,7 +859,9 @@ export class AuctionD1Store {
           eq(lotImages.active, true),
         ),
       )
+      .orderBy(asc(lotImages.sortOrder), asc(lotImages.createdAt))
       .limit(1);
+
     return row ?? null;
   }
 
