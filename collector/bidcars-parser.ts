@@ -328,8 +328,9 @@ export function parseBidcarsDetailHtml(html: string, url: string | null, baseUrl
       || readMatch(rawText, /\bOdometer\s+([\d\s,]+(?:mi|miles)(?:\s+\([\d\s,]+\s+km\))?)/i),
     location: readLabeledValue(html, ["Location", "Auction location", "Yard"])
       || readMatch(rawText, /\bLocation\s*:?\s+(.+?)\s+(?:Terminal|Shipping from|Seller|Odległość)\b/i),
-    color: readLabeledValue(html, ["Color", "Body color", "Vehicle color", "Exterior color"])
-      || readMatch(rawText, /\bExterior color\s+(.+?)\s+Transmission\b/i),
+      color: readMatch(rawText, /\bExterior color\s+([A-Za-z][A-Za-z0-9 /.'-]{1,50}?)\s+Transmission\b/i)
+        || readJsonLdString(jsonLd, "color")
+        || readLabeledValue(html, ["Exterior color", "Vehicle color", "Body color"]),
     seller: readLabeledValue(html, ["Seller", "Seller name"])
       || readMatch(rawText, /\bSeller\s*:?\s+([A-Za-z0-9 .&'/-]{2,80}?)\s+Sale Document\b/i),
     documents: readLabeledValue(html, ["Documents", "Title", "Title type", "Document type"])
