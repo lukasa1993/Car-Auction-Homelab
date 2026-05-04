@@ -255,32 +255,46 @@ export function parseBidcarsDetailHtml(html: string, url: string | null, baseUrl
     ? jsonLd.offers as Record<string, unknown>
     : null;
 
-  const title = readJsonLdString(jsonLd, "name") || readMatch(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  const fromUrl = parseLotNumberFromUrl(url);
+  const parsedUrl = url
+    || readMatch(rawText, /"url"\s*:\s*"([^"]*\/en\/lot\/[01]-[0-9]+[^"]*)"/i)
+    || readMatch(rawText, /\b(https:\/\/bid\.cars\/en\/lot\/[01]-[0-9]+[^\s"]*)/i);
+
+  const title = readJsonLdString(jsonLd, "name")
+    || readMatch(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i)
+    || readMatch(rawText, /\b(\d{4}\s+[A-Za-z][^|]+?\|\s*[A-HJ-NPR-Z0-9]{17}\s*\|\s*Bid History\s*\|\s*BidCars)/i);
+
+  const fromUrl = parseLotNumberFromUrl(parsedUrl);
   const fromSource = parseSourceFromHtml(html);
   const sourceKey = fromUrl.sourceKey || fromSource.sourceKey;
   const sourceLabel = sourceKey === "copart" ? "Copart" : sourceKey === "iaai" ? "IAAI" : fromSource.sourceLabel;
 
   const lotNumber = fromUrl.lotNumber
-    || readLabeledValue(html, ["Lot #", "Lot number", "Lot Number", "Lot No", "Lot"]);
+    || readLabeledValue(html, ["Lot #", "Lot number", "Lot Number", "Lot No", "Lot"])
+    || readMatch(rawText, /\bLot\s+(?:[01]-\s*)?([0-9]{4,})\b/i)
+    || readMatch(rawText, /\/lot\/[01]-([0-9]+)/i);
 
   const vin = readLabeledValue(html, ["VIN", "Vin", "VIN number", "Vin number"])
     || readJsonLdString(jsonLd, "vehicleIdentificationNumber")
     || parseVinFromText(title || "")
     || parseVinFromText(rawText);
 
-  const finalBidUsd = parsePrice(
-    readLabeledValue(html, [
-      "Sold for",
+  const finalBidRaw = readMatch(rawText, /\bvar\s+finalBid\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*;/i)
+    || readMatch(rawText, /\bVehicle information\s+Final bid\s+\$?\s*([\d,\s]+(?:\.\d{1,2})?)\s*USD\b/i)
+    || readMatch(rawText, /\bEstimated total price\s+\$?\s*([\d,\s]+(?:\.\d{1,2})?)\b/i)
+    || readMatch(rawText, /\bSales History\s+Auction Date\s+Lot #\s+Final bid\s+Odometer\s+Status\s+Seller\s+\w+\s+\d{4}-\d{2}-\d{2}\s+[01]-[0-9]+\s+\$?\s*([\d,\s]+(?:\.\d{1,2})?)/i)
+    || readMatch(rawText, /\bFinished\s+Final bid\s+\$?\s*([\d,\s]+(?:\.\d{1,2})?)/i)
+    || readLabeledValue(html, [
       "Final bid",
       "Final Bid",
+      "Sold for",
       "Final price",
       "Sold price",
       "Sale price",
       "Hammer price",
       "Purchase price",
-    ]),
-  ) || parsePrice(typeof jsonLdOffer?.price === "number" || typeof jsonLdOffer?.price === "string" ? String(jsonLdOffer.price) : null);
+    ]);
+
+  const finalBidUsd = parsePrice(finalBidRaw);
 
   const saleDateRaw = readLabeledValue(html, [
     "Sale date",
@@ -289,11 +303,14 @@ export function parseBidcarsDetailHtml(html: string, url: string | null, baseUrl
     "Date sold",
     "Sold on",
     "Auction date",
-  ]);
+  ])
+    || readMatch(rawText, /\bAuction date\s+([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})/i)
+    || readMatch(rawText, /\bCopart\s+(\d{4}-\d{2}-\d{2})\s+[01]-[0-9]+/i)
+    || readMatch(rawText, /"purchaseDate"\s*:\s*"([^"]+)"/i);
 
   const sale: BidcarsParsedSale = {
     title,
-    url: absolutizeUrl(url, baseUrl),
+    url: absolutizeUrl(parsedUrl, baseUrl),
     finalBidUsd,
     sourceKey,
     sourceLabel,
@@ -301,17 +318,25 @@ export function parseBidcarsDetailHtml(html: string, url: string | null, baseUrl
     vin: vin ? vin.toUpperCase().replace(/[^A-Z0-9*]/g, "") : null,
     saleDate: parseSaleDate(saleDateRaw),
     saleDateRaw,
-    condition: readLabeledValue(html, ["Condition", "Vehicle condition", "Run & Drive"]),
-    damage: readLabeledValue(html, ["Primary damage", "Damage", "Main damage"]),
-    secondaryDamage: readLabeledValue(html, ["Secondary damage", "Secondary Damage"]),
-    mileage: readLabeledValue(html, ["Odometer", "Mileage", "Miles"]),
-    location: readLabeledValue(html, ["Location", "Auction location", "Yard"]),
-    color: readLabeledValue(html, ["Color", "Body color", "Vehicle color", "Exterior color"]),
-    seller: readLabeledValue(html, ["Seller", "Seller name"]),
-    documents: readLabeledValue(html, ["Documents", "Title", "Title type", "Document type"]),
+    condition: readLabeledValue(html, ["Condition", "Vehicle condition", "Run & Drive"])
+      || readMatch(rawText, /\bStart code\s+(.+?)\s+Key\b/i),
+    damage: readLabeledValue(html, ["Primary damage", "Damage", "Main damage"])
+      || readMatch(rawText, /\bPrimary damage\s+(.+?)\s+Secondary damage\b/i),
+    secondaryDamage: readLabeledValue(html, ["Secondary damage", "Secondary Damage"])
+      || readMatch(rawText, /\bSecondary damage\s+(.+?)\s+Odometer\b/i),
+    mileage: readLabeledValue(html, ["Odometer", "Mileage", "Miles"])
+      || readMatch(rawText, /\bOdometer\s+([\d\s,]+(?:mi|miles)(?:\s+\([\d\s,]+\s+km\))?)/i),
+    location: readLabeledValue(html, ["Location", "Auction location", "Yard"])
+      || readMatch(rawText, /\bLocation\s*:?\s+(.+?)\s+(?:Terminal|Shipping from|Seller|Odległość)\b/i),
+    color: readLabeledValue(html, ["Color", "Body color", "Vehicle color", "Exterior color"])
+      || readMatch(rawText, /\bExterior color\s+(.+?)\s+Transmission\b/i),
+    seller: readLabeledValue(html, ["Seller", "Seller name"])
+      || readMatch(rawText, /\bSeller\s*:?\s+([A-Za-z0-9 .&'/-]{2,80}?)\s+Sale Document\b/i),
+    documents: readLabeledValue(html, ["Documents", "Title", "Title type", "Document type"])
+      || readMatch(rawText, /\bSale Document\s+(.+?)\s+Loss\b/i),
     rawText,
   };
-
+console.log(sale)
   if (!sale.finalBidUsd && !sale.lotNumber && !sale.vin) {
     return null;
   }
