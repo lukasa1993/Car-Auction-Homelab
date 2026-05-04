@@ -210,9 +210,11 @@ export async function handlePushSubscribe(request: Request): Promise<Response> {
 export async function handleImageResponse(imageId: string): Promise<Response> {
   const store = await getAuctionStore();
   const result = await store.getImageObject(imageId);
+
   if (!result) {
     return Response.json({ error: "Image not found" }, { status: 404 });
   }
+
   return new Response(result.object.body, {
     headers: {
       "content-type":
@@ -220,6 +222,9 @@ export async function handleImageResponse(imageId: string): Promise<Response> {
         result.object.httpMetadata?.contentType ||
         "application/octet-stream",
       "cache-control": "public, max-age=300",
+      "x-lot-number": result.lotNumber,
+      "x-source-key": result.sourceKey,
+      "x-image-id": result.image.id,
     },
   });
 }

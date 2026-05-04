@@ -822,10 +822,43 @@ export class AuctionD1Store {
   }
 
   async getImageObject(imageId: string) {
-    const image = await this.getImageRow(imageId);
-    if (!image) return null;
-    const object = await this.images.get(image.storagePath);
-    return object ? { image, object } : null;
+    const [row] = await this.db
+      .select({
+        id: lotImages.id,
+        lotId: lotImages.lotId,
+        sourceUrl: lotImages.sourceUrl,
+        storagePath: lotImages.storagePath,
+        mimeType: lotImages.mimeType,
+        sha256: lotImages.sha256,
+        byteSize: lotImages.byteSize,
+        width: lotImages.width,
+        height: lotImages.height,
+        sortOrder: lotImages.sortOrder,
+        createdAt: lotImages.createdAt,
+        lastSeenAt: lotImages.lastSeenAt,
+        lastSyncRunId: lotImages.lastSyncRunId,
+        active: lotImages.active,
+        lotNumber: lots.lotNumber,
+        sourceKey: lots.sourceKey,
+      })
+      .from(lotImages)
+      .innerJoin(lots, eq(lots.id, lotImages.lotId))
+      .where(eq(lotImages.id, imageId))
+      .limit(1);
+
+    if (!row) return null;
+
+    const object = await this.images.get(row.storagePath);
+    if (!object) return null;
+
+    const { lotNumber, sourceKey, ...image } = row;
+
+    return {
+      image,
+      object,
+      lotNumber,
+      sourceKey,
+    };
   }
 
   async setWorkflowState(
