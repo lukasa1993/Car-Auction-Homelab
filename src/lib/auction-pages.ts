@@ -2,8 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import type {
   LotDetail,
+  SoldPriceExplorerAnalytics,
   SoldPriceExplorerData,
   SoldPriceExplorerFilters,
+  SoldPriceExplorerItem,
+  SoldPriceExplorerSummary,
   VinTarget,
 } from "@/lib/types";
 
@@ -43,6 +46,112 @@ function resolveTab(raw: string | null | undefined, availableTabs: Array<{ key: 
 
 function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function priceValues(items: SoldPriceExplorerItem[]): number[] {
+  return items
+    .map((item) => item.soldPrice.finalBidUsd)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+}
+
+function latestSaleDate(items: SoldPriceExplorerItem[]): string | null {
+  let latestMs = Number.NEGATIVE_INFINITY;
+  let latestValue: string | null = null;
+  for (const item of items) {
+    const value = item.soldPrice.saleDate || item.soldPrice.foundAt || item.updatedAt;
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed) && parsed > latestMs) {
+      latestMs = parsed;
+      latestValue = value;
+    }
+  }
+  return latestValue;
+}
+
+function buildPriceSummary(items: SoldPriceExplorerItem[]): SoldPriceExplorerSummary {
+  const values = priceValues(items);
+  const totalUsd = values.reduce((total, value) => total + value, 0);
+  return {
+    lotCount: items.length,
+    averageUsd: values.length ? totalUsd / values.length : null,
+    medianUsd: median(values),
+    minUsd: values.length ? Math.min(...values) : null,
+    maxUsd: values.length ? Math.max(...values) : null,
+    totalUsd,
+    outlierCount: items.filter((item) => item.stats.outlier).length,
+    modelCount: new Set(items.map((item) => item.carType)).size,
+    sourceCount: new Set(items.map((item) => item.sourceKey)).size,
+    latestSaleDate: latestSaleDate(items),
+  };
+}
+
+function buildSoldExplorerAnalytics(items: SoldPriceExplorerItem[]): SoldPriceExplorerAnalytics {
+  const modelGroups = new Map<string, SoldPriceExplorerItem[]>();
+  const sourceGroups = new Map<string, SoldPriceExplorerItem[]>();
+  for (const item of items) {
+    modelGroups.set(item.carType, [...(modelGroups.get(item.carType) ?? []), item]);
+    sourceGroups.set(item.sourceKey, [...(sourceGroups.get(item.sourceKey) ?? []), item]);
+  }
+
+  const modelAverages = [...modelGroups.entries()]
+    .map(([key, group]) => {
+      const summary = buildPriceSummary(group);
+      return {
+        key,
+        label: stripTeslaPrefix(key),
+        lotCount: summary.lotCount,
+        averageUsd: summary.averageUsd,
+        medianUsd: summary.medianUsd,
+        minUsd: summary.minUsd,
+        maxUsd: summary.maxUsd,
+        totalUsd: summary.totalUsd,
+        outlierCount: summary.outlierCount,
+        sourceCount: summary.sourceCount,
+        latestSaleDate: summary.latestSaleDate,
+      };
+    })
+    .sort(
+      (left, right) =>
+        (right.averageUsd ?? 0) - (left.averageUsd ?? 0) ||
+        right.lotCount - left.lotCount ||
+        left.label.localeCompare(right.label),
+    );
+
+  const sourceBreakdown = [...sourceGroups.entries()]
+    .map(([key, group]) => {
+      const summary = buildPriceSummary(group);
+      return {
+        key,
+        label: group[0]?.sourceLabel ?? key,
+        lotCount: summary.lotCount,
+        averageUsd: summary.averageUsd,
+        medianUsd: summary.medianUsd,
+        minUsd: summary.minUsd,
+        maxUsd: summary.maxUsd,
+        totalUsd: summary.totalUsd,
+        modelCount: summary.modelCount,
+        outlierCount: summary.outlierCount,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.lotCount - left.lotCount ||
+        (right.averageUsd ?? 0) - (left.averageUsd ?? 0) ||
+        left.label.localeCompare(right.label),
+    );
+
+  return {
+    summary: buildPriceSummary(items),
+    modelAverages,
+    sourceBreakdown,
+  };
 }
 
 async function buildSoldExplorerData(
@@ -119,6 +228,7 @@ async function buildSoldExplorerData(
     });
 
   return {
+    analytics: buildSoldExplorerAnalytics(filtered),
     items: filtered,
     filters,
     options: {
@@ -147,7 +257,7 @@ export const getMainPageData = createServerFn()
     const activeTab = resolveTab(data.tab, modelTabs);
     const activeModelTab =
       activeTab === "all" ? null : modelTabs.find((tab) => tab.key === activeTab) || null;
-    const allLots = await store.getPublicLotList();
+    const allLots = (await store.getPublicLotList()).filter((lot) => lot.status !== "done");
     const lots = activeModelTab
       ? allLots.filter(
           (lot) =>

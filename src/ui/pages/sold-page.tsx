@@ -96,6 +96,184 @@ function absoluteDelta(item: SoldPriceExplorerItem): number {
   return Math.abs(item.stats.deltaUsd ?? 0);
 }
 
+function formatCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatPriceRange(minUsd: number | null, maxUsd: number | null): string {
+  if (minUsd == null || maxUsd == null) {
+    return "—";
+  }
+  if (minUsd === maxUsd) {
+    return formatUsd(minUsd);
+  }
+  return `${formatUsd(minUsd)}–${formatUsd(maxUsd)}`;
+}
+
+function MetricTile({
+  detail,
+  label,
+  value,
+}: {
+  detail: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border/70 p-3">
+      <div className="truncate text-sm text-muted-foreground">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="mt-1 truncate text-sm text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+function AnalyticsSummary({ props }: { props: SoldPageProps }) {
+  const { summary } = props.analytics;
+  return (
+    <div className="grid gap-2 @2xl:grid-cols-4">
+      <MetricTile
+        detail={`${formatCount(summary.lotCount)} sold · ${formatCount(summary.modelCount)} model${summary.modelCount === 1 ? "" : "s"}`}
+        label="Average sale"
+        value={formatUsd(summary.averageUsd)}
+      />
+      <MetricTile
+        detail={`Range ${formatPriceRange(summary.minUsd, summary.maxUsd)}`}
+        label="Median sale"
+        value={formatUsd(summary.medianUsd)}
+      />
+      <MetricTile
+        detail={`${formatCount(summary.sourceCount)} source${summary.sourceCount === 1 ? "" : "s"} · latest ${saleDateLabel(summary.latestSaleDate)}`}
+        label="Sales volume"
+        value={formatUsd(summary.totalUsd)}
+      />
+      <MetricTile
+        detail={`${formatCount(summary.outlierCount)} outside cohort range`}
+        label="Outliers"
+        value={formatCount(summary.outlierCount)}
+      />
+    </div>
+  );
+}
+
+function ModelAveragesTable({ props }: { props: SoldPageProps }) {
+  const rows = props.analytics.modelAverages;
+
+  return (
+    <section className="grid gap-2">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Per model averages</h2>
+          <p className="text-base text-muted-foreground sm:text-sm">
+            Average, median, range, and sale depth for the current sold view.
+          </p>
+        </div>
+      </div>
+      <div className="-mx-3 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-5">
+        <div className="inline-block min-w-full px-3 py-2 align-middle sm:px-5">
+          <table className="w-full text-left text-base sm:text-sm">
+            <thead>
+              <tr className="border-b border-border/70 text-muted-foreground">
+                <th className="whitespace-nowrap py-3 pr-3 font-medium">Model</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Lots</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Average</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Median</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Range</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Volume</th>
+                <th className="whitespace-nowrap py-3 pl-3 text-right font-medium">Latest</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr className="border-b border-border/70" key={row.key}>
+                  <td className="py-3 pr-3 align-middle">
+                    <div className="font-medium text-foreground">{row.label}</div>
+                    <div className="text-base text-muted-foreground sm:text-sm">
+                      {formatCount(row.sourceCount)} source{row.sourceCount === 1 ? "" : "s"} · {formatCount(row.outlierCount)} outlier{row.outlierCount === 1 ? "" : "s"}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatCount(row.lotCount)}</td>
+                  <td className="px-3 py-3 text-right align-middle font-medium tabular-nums">{formatUsd(row.averageUsd)}</td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatUsd(row.medianUsd)}</td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatPriceRange(row.minUsd, row.maxUsd)}</td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatUsd(row.totalUsd)}</td>
+                  <td className="py-3 pl-3 text-right align-middle tabular-nums">{saleDateLabel(row.latestSaleDate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 ? (
+            <div className="border-b border-border/70 py-8 text-center text-base text-muted-foreground sm:text-sm">
+              No model averages for these filters.
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SourceBreakdownTable({ props }: { props: SoldPageProps }) {
+  const rows = props.analytics.sourceBreakdown;
+
+  return (
+    <section className="grid gap-2">
+      <div>
+        <h2 className="text-base font-semibold">Source breakdown</h2>
+        <p className="text-base text-muted-foreground sm:text-sm">
+          Compare average price and model coverage by auction source.
+        </p>
+      </div>
+      <div className="-mx-3 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-5">
+        <div className="inline-block min-w-full px-3 py-2 align-middle sm:px-5">
+          <table className="w-full text-left text-base sm:text-sm">
+            <thead>
+              <tr className="border-b border-border/70 text-muted-foreground">
+                <th className="whitespace-nowrap py-3 pr-3 font-medium">Source</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Lots</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Average</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Median</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Range</th>
+                <th className="whitespace-nowrap py-3 pl-3 text-right font-medium">Models</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr className="border-b border-border/70" key={row.key}>
+                  <td className="py-3 pr-3 align-middle font-medium text-foreground">{row.label}</td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatCount(row.lotCount)}</td>
+                  <td className="px-3 py-3 text-right align-middle font-medium tabular-nums">{formatUsd(row.averageUsd)}</td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatUsd(row.medianUsd)}</td>
+                  <td className="px-3 py-3 text-right align-middle tabular-nums">{formatPriceRange(row.minUsd, row.maxUsd)}</td>
+                  <td className="py-3 pl-3 text-right align-middle tabular-nums">
+                    {formatCount(row.modelCount)}
+                    {row.outlierCount ? ` · ${formatCount(row.outlierCount)} outlier${row.outlierCount === 1 ? "" : "s"}` : ""}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 ? (
+            <div className="border-b border-border/70 py-8 text-center text-base text-muted-foreground sm:text-sm">
+              No source breakdown for these filters.
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SoldAnalytics({ props }: { props: SoldPageProps }) {
+  return (
+    <section className="grid gap-4 border-y border-border/70 py-4 @container">
+      <AnalyticsSummary props={props} />
+      <ModelAveragesTable props={props} />
+      <SourceBreakdownTable props={props} />
+    </section>
+  );
+}
+
 function SoldFilters({ props }: { props: SoldPageProps }) {
   const { filters, options } = props;
   return (
@@ -331,6 +509,7 @@ export function SoldPage(props: SoldPageProps) {
         </div>
 
         <SoldFilters props={props} />
+        <SoldAnalytics props={props} />
         <OutlierLots items={props.items} />
         <SoldTable items={props.items} />
       </div>

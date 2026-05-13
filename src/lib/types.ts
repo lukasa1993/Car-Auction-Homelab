@@ -291,7 +291,54 @@ export interface SoldPriceExplorerOptions {
   years: number[];
 }
 
+export interface SoldPriceExplorerSummary {
+  lotCount: number;
+  averageUsd: number | null;
+  medianUsd: number | null;
+  minUsd: number | null;
+  maxUsd: number | null;
+  totalUsd: number;
+  outlierCount: number;
+  modelCount: number;
+  sourceCount: number;
+  latestSaleDate: string | null;
+}
+
+export interface SoldPriceModelAverage {
+  key: string;
+  label: string;
+  lotCount: number;
+  averageUsd: number | null;
+  medianUsd: number | null;
+  minUsd: number | null;
+  maxUsd: number | null;
+  totalUsd: number;
+  outlierCount: number;
+  sourceCount: number;
+  latestSaleDate: string | null;
+}
+
+export interface SoldPriceSourceAnalytics {
+  key: string;
+  label: string;
+  lotCount: number;
+  averageUsd: number | null;
+  medianUsd: number | null;
+  minUsd: number | null;
+  maxUsd: number | null;
+  totalUsd: number;
+  modelCount: number;
+  outlierCount: number;
+}
+
+export interface SoldPriceExplorerAnalytics {
+  summary: SoldPriceExplorerSummary;
+  modelAverages: SoldPriceModelAverage[];
+  sourceBreakdown: SoldPriceSourceAnalytics[];
+}
+
 export interface SoldPriceExplorerData {
+  analytics: SoldPriceExplorerAnalytics;
   items: SoldPriceExplorerItem[];
   filters: SoldPriceExplorerFilters;
   options: SoldPriceExplorerOptions;
