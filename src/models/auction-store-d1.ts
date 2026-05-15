@@ -330,7 +330,7 @@ function buildSoldPriceStats(
 ): SoldPriceExplorerItem[] {
   const groups = new Map<string, Array<LotListItem & { soldPrice: SoldPriceRow }>>();
   for (const item of items) {
-    const groupModel = item.targetKey || item.carType;
+    const groupModel = item.carType;
     const groupYear = item.modelYear == null ? "unknown" : String(item.modelYear);
     const groupKey = `${item.sourceKey}:${groupModel}:${groupYear}`;
     const group = groups.get(groupKey) ?? [];
@@ -339,7 +339,7 @@ function buildSoldPriceStats(
   }
 
   return items.map((item) => {
-    const groupModel = item.targetKey || item.carType;
+    const groupModel = item.carType;
     const groupYear = item.modelYear == null ? "unknown" : String(item.modelYear);
     const groupKey = `${item.sourceKey}:${groupModel}:${groupYear}`;
     const group = groups.get(groupKey) ?? [];

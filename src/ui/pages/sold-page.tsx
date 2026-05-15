@@ -2,13 +2,10 @@ import * as React from "react";
 import {
   ArrowUpDown,
   CalendarDays,
-  Car,
   DollarSign,
   ExternalLink,
-  Filter,
   MapPin,
   Search,
-  TrendingUp,
 } from "lucide-react";
 
 import type { SoldPriceExplorerData, SoldPriceExplorerItem } from "../../lib/types";
@@ -28,8 +25,6 @@ import {
 } from "../format";
 
 export type SoldPageProps = SoldPriceExplorerData;
-
-type IconComponent = React.ComponentType<{ className?: string }>;
 
 function saleDateLabel(value: string | null | undefined): string {
   if (!value) {
@@ -72,21 +67,6 @@ function outlierToneClass(outlier: SoldPriceExplorerItem["stats"]["outlier"]): s
   return "bg-card/70 ring-border/70";
 }
 
-function buildFilterAction(filters: SoldPageProps["filters"], overrides: Partial<SoldPageProps["filters"]>): string {
-  const next = { ...filters, ...overrides };
-  const params = new URLSearchParams();
-  if (next.model && next.model !== "all") params.set("model", next.model);
-  if (next.source && next.source !== "all") params.set("source", next.source);
-  if (next.year && next.year !== "all") params.set("year", next.year);
-  if (next.minPrice) params.set("minPrice", next.minPrice);
-  if (next.maxPrice) params.set("maxPrice", next.maxPrice);
-  if (next.q) params.set("q", next.q);
-  if (next.highlightedOnly) params.set("highlighted", "1");
-  if (next.sort && next.sort !== "sale-desc") params.set("sort", next.sort);
-  const query = params.toString();
-  return query ? `/sold?${query}` : "/sold";
-}
-
 function lotTitle(item: SoldPriceExplorerItem): string {
   const title = stripTeslaPrefix(item.carType);
   return item.modelYear ? `${item.modelYear} ${title}` : title;
@@ -127,16 +107,6 @@ function median(values: number[]): number | null {
     return sorted[middle];
   }
   return (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
-function formatPriceRange(minUsd: number | null, maxUsd: number | null): string {
-  if (minUsd == null || maxUsd == null) {
-    return "—";
-  }
-  if (minUsd === maxUsd) {
-    return formatUsd(minUsd);
-  }
-  return `${formatUsd(minUsd)}–${formatUsd(maxUsd)}`;
 }
 
 function activeFilterCount(filters: SoldPageProps["filters"]): number {
@@ -189,11 +159,8 @@ function topOutliers(items: SoldPriceExplorerItem[]): SoldPriceExplorerItem[] {
 }
 
 function PageHeader({ props }: { props: SoldPageProps }) {
-  const { summary } = props.analytics;
   const filtersApplied = activeFilterCount(props.filters);
-  const highlightedHref = buildFilterAction(props.filters, {
-    highlightedOnly: !props.filters.highlightedOnly,
-  });
+  const cohortCount = new Set(props.items.map((item) => item.stats.groupLabel)).size;
 
   return (
     <header className="grid gap-5 border-b border-border/70 pb-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -202,8 +169,8 @@ function PageHeader({ props }: { props: SoldPageProps }) {
           <Badge variant="outline">
             {formatCount(props.items.length)} shown
           </Badge>
-          <Badge variant={summary.outlierCount ? "warning" : "muted"}>
-            {formatCount(summary.outlierCount)} outlier{summary.outlierCount === 1 ? "" : "s"}
+          <Badge variant="muted">
+            {formatCount(cohortCount)} model cohort{cohortCount === 1 ? "" : "s"}
           </Badge>
           {filtersApplied ? (
             <Badge variant="muted">
@@ -223,78 +190,12 @@ function PageHeader({ props }: { props: SoldPageProps }) {
 
       <div className="flex flex-wrap items-center gap-2 lg:justify-end">
         <Button asChild size="sm" type="button" variant="outline">
-          <a href={highlightedHref}>
-            <Filter className="size-3.5" />
-            {props.filters.highlightedOnly ? "Show all" : "Outliers"}
-          </a>
-        </Button>
-        <Button asChild size="sm" type="button" variant="outline">
           <a href="#sold-results">
             Results
           </a>
         </Button>
       </div>
     </header>
-  );
-}
-
-function MetricBlock({
-  detail,
-  icon: Icon,
-  label,
-  value,
-}: {
-  detail: string;
-  icon: IconComponent;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="grid gap-3 border-border/70 py-4 first:pt-0 last:pb-0 sm:border-l sm:px-5 sm:py-0 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
-      <div className="flex items-center gap-2 text-base text-muted-foreground sm:text-sm">
-        <Icon className="size-5 sm:size-4" />
-        <span>{label}</span>
-      </div>
-      <div className="grid gap-1">
-        <div className="text-3xl font-semibold tracking-tight tabular-nums sm:text-2xl">{value}</div>
-        <p className="text-base text-muted-foreground sm:text-sm">{detail}</p>
-      </div>
-    </div>
-  );
-}
-
-function MarketSummary({ props }: { props: SoldPageProps }) {
-  const { summary } = props.analytics;
-
-  return (
-    <section className="@container">
-      <div className="grid divide-y divide-border/70 rounded-3xl bg-card/65 px-4 ring-1 ring-border/70 shadow-[0_24px_80px_-58px_rgba(18,18,18,0.45)] sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:px-5 lg:grid-cols-4">
-        <MetricBlock
-          detail={`${formatCount(summary.lotCount)} sold · ${formatCount(summary.modelCount)} model${summary.modelCount === 1 ? "" : "s"}`}
-          icon={DollarSign}
-          label="Average sale"
-          value={formatUsd(summary.averageUsd)}
-        />
-        <MetricBlock
-          detail={`Range ${formatPriceRange(summary.minUsd, summary.maxUsd)}`}
-          icon={TrendingUp}
-          label="Median sale"
-          value={formatUsd(summary.medianUsd)}
-        />
-        <MetricBlock
-          detail={`${formatCount(summary.sourceCount)} source${summary.sourceCount === 1 ? "" : "s"} tracked`}
-          icon={Car}
-          label="Sales volume"
-          value={formatUsd(summary.totalUsd)}
-        />
-        <MetricBlock
-          detail={`${formatCount(summary.outlierCount)} outside cohort range`}
-          icon={CalendarDays}
-          label="Latest sale"
-          value={saleDateLabel(summary.latestSaleDate)}
-        />
-      </div>
-    </section>
   );
 }
 
@@ -456,6 +357,7 @@ type ValueCohortItem = {
 };
 
 function valueCohorts(items: SoldPriceExplorerItem[]): Array<{
+  averageUsd: number | null;
   groupLabel: string;
   items: ValueCohortItem[];
   medianUsd: number | null;
@@ -469,8 +371,10 @@ function valueCohorts(items: SoldPriceExplorerItem[]): Array<{
     const values = groupItems
       .map((item) => item.soldPrice.finalBidUsd)
       .filter((value): value is number => value != null && Number.isFinite(value));
+    const averageUsd = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
     const medianUsd = median(values);
     return {
+      averageUsd,
       groupLabel,
       items: groupItems
         .map((item) => {
@@ -498,12 +402,10 @@ function valueCohorts(items: SoldPriceExplorerItem[]): Array<{
 
 function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
   const { deltaPercent, deltaUsd, item } = valueItem;
+  const lotHref = `/lots/${item.sourceKey}/${item.lotNumber}`;
 
   return (
-    <a
-      className="grid grid-cols-[auto_1fr] gap-3 rounded-2xl p-2 hover:bg-accent/60"
-      href={`/lots/${item.sourceKey}/${item.lotNumber}`}
-    >
+    <div className="grid grid-cols-[auto_1fr] gap-3 rounded-2xl p-2 hover:bg-accent/60">
       <LotImagePreview
         lot={item}
         placeholderClassName="h-16 w-24 rounded-xl text-[11px]"
@@ -512,7 +414,9 @@ function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
       <div className="grid min-w-0 gap-2">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate font-medium text-foreground">Lot {item.lotNumber}</div>
+            <a className="block truncate font-medium text-foreground underline-offset-2 hover:underline" href={lotHref}>
+              Lot {item.lotNumber}
+            </a>
             <div className="truncate text-base text-muted-foreground sm:text-sm">{lotDetails(item)}</div>
           </div>
           <Badge variant={deltaVariant(deltaUsd)}>{deltaLabel(deltaUsd)}</Badge>
@@ -524,7 +428,7 @@ function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
           </div>
         </div>
       </div>
-    </a>
+    </div>
   );
 }
 
@@ -549,7 +453,8 @@ function ValueByModel({ items }: { items: SoldPriceExplorerItem[] }) {
                   <div className="min-w-0">
                     <h3 className="truncate text-base font-semibold">{cohort.groupLabel}</h3>
                     <p className="text-base text-muted-foreground sm:text-sm">
-                      Median {formatUsd(cohort.medianUsd)} · {formatCount(cohort.items.length)} sold comp{cohort.items.length === 1 ? "" : "s"}
+                      Average {formatUsd(cohort.averageUsd)} · Median {formatUsd(cohort.medianUsd)} · {formatCount(cohort.items.length)} sold comp
+                      {cohort.items.length === 1 ? "" : "s"}
                     </p>
                   </div>
                 </div>
@@ -838,7 +743,6 @@ export function SoldPage(props: SoldPageProps) {
     <main className="isolate min-h-dvh bg-background px-3 py-5 text-foreground antialiased sm:px-5 sm:py-7">
       <div className="mx-auto flex max-w-[1320px] flex-col gap-6">
         <PageHeader props={props} />
-        <MarketSummary props={props} />
         <SoldFilters props={props} />
 
         <div className="grid gap-6">
