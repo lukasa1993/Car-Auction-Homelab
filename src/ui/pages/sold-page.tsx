@@ -4,6 +4,7 @@ import {
   CalendarDays,
   DollarSign,
   ExternalLink,
+  FileText,
   MapPin,
   Search,
 } from "lucide-react";
@@ -72,6 +73,10 @@ function lotTitle(item: SoldPriceExplorerItem): string {
   return item.modelYear ? `${item.modelYear} ${title}` : title;
 }
 
+function lotHref(item: SoldPriceExplorerItem): string {
+  return `/lots/${item.sourceKey}/${item.lotNumber}`;
+}
+
 function lotDetails(item: SoldPriceExplorerItem): string {
   const color = item.soldPrice.color || item.color || extractLotColor(item.evidence);
   return [
@@ -95,6 +100,35 @@ function absoluteDelta(item: SoldPriceExplorerItem): number {
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function SoldLotActions({
+  className,
+  fullWidth = false,
+  item,
+}: {
+  className?: string;
+  fullWidth?: boolean;
+  item: SoldPriceExplorerItem;
+}) {
+  const actionClassName = cn("h-7 gap-1.5 rounded-xl px-2 text-[11px]", fullWidth && "min-w-0 flex-1");
+
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      <Button asChild className={actionClassName} size="sm" type="button" variant="outline">
+        <a href={lotHref(item)}>
+          <FileText className="size-3.5" />
+          Lot
+        </a>
+      </Button>
+      <Button asChild className={actionClassName} size="sm" type="button" variant="outline">
+        <a href={item.url} rel="noopener noreferrer" target="_blank">
+          {item.sourceLabel}
+          <ExternalLink className="size-3.5" />
+        </a>
+      </Button>
+    </div>
+  );
 }
 
 function median(values: number[]): number | null {
@@ -402,7 +436,7 @@ function valueCohorts(items: SoldPriceExplorerItem[]): Array<{
 
 function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
   const { deltaPercent, deltaUsd, item } = valueItem;
-  const lotHref = `/lots/${item.sourceKey}/${item.lotNumber}`;
+  const detailHref = lotHref(item);
 
   return (
     <div className="grid grid-cols-[auto_1fr] gap-3 rounded-2xl p-2 hover:bg-accent/60">
@@ -414,7 +448,7 @@ function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
       <div className="grid min-w-0 gap-2">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0">
-            <a className="block truncate font-medium text-foreground underline-offset-2 hover:underline" href={lotHref}>
+            <a className="block truncate font-medium text-foreground underline-offset-2 hover:underline" href={detailHref}>
               Lot {item.lotNumber}
             </a>
             <div className="truncate text-base text-muted-foreground sm:text-sm">{lotDetails(item)}</div>
@@ -427,6 +461,7 @@ function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
             {formatSignedUsd(deltaUsd)} · {formatPercent(deltaPercent)}
           </div>
         </div>
+        <SoldLotActions item={item} />
       </div>
     </div>
   );
@@ -528,7 +563,7 @@ function OutlierLots({ items }: { items: SoldPriceExplorerItem[] }) {
               <div className="grid min-w-0 content-between gap-3">
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center justify-between gap-2">
-                    <a className="truncate font-medium text-foreground underline-offset-2 hover:underline" href={`/lots/${item.sourceKey}/${item.lotNumber}`}>
+                    <a className="truncate font-medium text-foreground underline-offset-2 hover:underline" href={lotHref(item)}>
                       Lot {item.lotNumber}
                     </a>
                     <Badge variant={outlierVariant(item.stats.outlier)}>{outlierLabel(item.stats.outlier)}</Badge>
@@ -536,6 +571,7 @@ function OutlierLots({ items }: { items: SoldPriceExplorerItem[] }) {
                   <div className="truncate text-base text-muted-foreground sm:text-sm">{lotTitle(item)}</div>
                 </div>
                 <PriceDelta align="left" item={item} />
+                <SoldLotActions item={item} />
               </div>
             </article>
           ))}
@@ -557,7 +593,7 @@ function MobileResultCard({ item }: { item: SoldPriceExplorerItem }) {
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <a className="font-medium text-foreground underline-offset-2 hover:underline" href={`/lots/${item.sourceKey}/${item.lotNumber}`}>
+              <a className="font-medium text-foreground underline-offset-2 hover:underline" href={lotHref(item)}>
                 Lot {item.lotNumber}
               </a>
               <p className="text-base text-muted-foreground sm:text-sm">{item.sourceLabel}</p>
@@ -600,22 +636,7 @@ function MobileResultCard({ item }: { item: SoldPriceExplorerItem }) {
           <MapPin className="size-5 sm:size-4" />
           <span className="truncate">{lotLocation(item)}</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild className="flex-1 rounded-2xl sm:flex-none" size="sm" type="button" variant="outline">
-            <a href={item.url} rel="noopener noreferrer" target="_blank">
-              Source
-              <ExternalLink className="size-3.5" />
-            </a>
-          </Button>
-          {item.soldPrice.externalUrl ? (
-            <Button asChild className="flex-1 rounded-2xl sm:flex-none" size="sm" type="button" variant="outline">
-              <a href={item.soldPrice.externalUrl} rel="noopener noreferrer" target="_blank">
-                bid.cars
-                <ExternalLink className="size-3.5" />
-              </a>
-            </Button>
-          ) : null}
-        </div>
+        <SoldLotActions fullWidth item={item} />
       </div>
     </article>
   );
@@ -647,7 +668,7 @@ function ResultsTable({ items }: { items: SoldPriceExplorerItem[] }) {
                       thumbClassName="h-16 w-28 rounded-2xl bg-muted/30"
                     />
                     <div>
-                      <a className="font-medium text-foreground underline-offset-2 hover:underline" href={`/lots/${item.sourceKey}/${item.lotNumber}`}>
+                      <a className="font-medium text-foreground underline-offset-2 hover:underline" href={lotHref(item)}>
                         Lot {item.lotNumber}
                       </a>
                       <div className="text-base text-muted-foreground sm:text-sm">{item.sourceLabel}</div>
@@ -678,22 +699,7 @@ function ResultsTable({ items }: { items: SoldPriceExplorerItem[] }) {
                   <div className="text-base text-muted-foreground sm:text-sm">{item.stats.groupLabel}</div>
                 </td>
                 <td className="py-3 pl-3 text-right align-middle">
-                  <div className="flex justify-end gap-2">
-                    <Button asChild size="sm" type="button" variant="outline">
-                      <a href={item.url} rel="noopener noreferrer" target="_blank">
-                        Source
-                        <ExternalLink className="size-3.5" />
-                      </a>
-                    </Button>
-                    {item.soldPrice.externalUrl ? (
-                      <Button asChild size="sm" type="button" variant="outline">
-                        <a href={item.soldPrice.externalUrl} rel="noopener noreferrer" target="_blank">
-                          bid.cars
-                          <ExternalLink className="size-3.5" />
-                        </a>
-                      </Button>
-                    ) : null}
-                  </div>
+                  <SoldLotActions className="justify-end" item={item} />
                 </td>
               </tr>
             ))}
