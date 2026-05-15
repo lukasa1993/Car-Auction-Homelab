@@ -117,6 +117,18 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function median(values: number[]): number | null {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) {
+    return sorted[middle];
+  }
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 function formatPriceRange(minUsd: number | null, maxUsd: number | null): string {
   if (minUsd == null || maxUsd == null) {
     return "—";
@@ -174,11 +186,6 @@ function topOutliers(items: SoldPriceExplorerItem[]): SoldPriceExplorerItem[] {
   return items
     .filter((item) => item.stats.outlier)
     .sort((left, right) => absoluteDelta(right) - absoluteDelta(left));
-}
-
-function barStyle(value: number, max: number): React.CSSProperties {
-  const percentage = max > 0 ? Math.max(6, Math.min(100, (value / max) * 100)) : 0;
-  return { "--value-width": `${percentage}%` } as React.CSSProperties;
 }
 
 function PageHeader({ props }: { props: SoldPageProps }) {
@@ -422,159 +429,144 @@ function SoldFilters({ props }: { props: SoldPageProps }) {
   );
 }
 
-function LeaderboardRow({
-  label,
-  meta,
-  value,
-  valueMax,
-}: {
-  label: string;
-  meta: string;
-  value: number;
-  valueMax: number;
-}) {
-  return (
-    <div className="grid gap-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium text-foreground">{label}</div>
-          <div className="truncate text-base text-muted-foreground sm:text-sm">{meta}</div>
-        </div>
-        <div className="shrink-0 font-semibold tabular-nums">{formatUsd(value)}</div>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className="h-full w-(--value-width) rounded-full bg-foreground/70" style={barStyle(value, valueMax)} />
-      </div>
-    </div>
-  );
+function deltaVariant(deltaUsd: number | null): "warning" | "success" | "muted" {
+  if (deltaUsd == null || deltaUsd === 0) {
+    return "muted";
+  }
+  return deltaUsd < 0 ? "success" : "warning";
 }
 
-function ModelMarket({ props }: { props: SoldPageProps }) {
-  const rows = props.analytics.modelAverages;
-  const maxAverage = Math.max(...rows.map((row) => row.averageUsd ?? 0), 0);
+function deltaLabel(deltaUsd: number | null): string {
+  if (deltaUsd == null) {
+    return "No comp";
+  }
+  if (deltaUsd < 0) {
+    return "Under median";
+  }
+  if (deltaUsd > 0) {
+    return "Over median";
+  }
+  return "At median";
+}
 
-  if (!rows.length) {
-    return (
-      <section className="grid gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight text-balance">Model market</h2>
-          <p className="text-base text-muted-foreground sm:text-sm">
-            Average and median by model in the current view.
-          </p>
-        </div>
-        <div className="rounded-3xl border border-border/70 bg-card/65 p-4 text-base text-muted-foreground sm:text-sm">
-          No model averages for these filters.
-        </div>
-      </section>
-    );
+type ValueCohortItem = {
+  deltaPercent: number | null;
+  deltaUsd: number | null;
+  item: SoldPriceExplorerItem;
+};
+
+function valueCohorts(items: SoldPriceExplorerItem[]): Array<{
+  groupLabel: string;
+  items: ValueCohortItem[];
+  medianUsd: number | null;
+}> {
+  const groups = new Map<string, SoldPriceExplorerItem[]>();
+  for (const item of items) {
+    groups.set(item.stats.groupLabel, [...(groups.get(item.stats.groupLabel) ?? []), item]);
   }
 
+  return [...groups.entries()].map(([groupLabel, groupItems]) => {
+    const values = groupItems
+      .map((item) => item.soldPrice.finalBidUsd)
+      .filter((value): value is number => value != null && Number.isFinite(value));
+    const medianUsd = median(values);
+    return {
+      groupLabel,
+      items: groupItems
+        .map((item) => {
+          const price = item.soldPrice.finalBidUsd;
+          const deltaUsd = price == null || medianUsd == null ? null : price - medianUsd;
+          return {
+            deltaPercent: deltaUsd == null || !medianUsd ? null : deltaUsd / medianUsd,
+            deltaUsd,
+            item,
+          };
+        })
+        .sort((left, right) => {
+          const leftDelta = left.deltaUsd ?? Number.POSITIVE_INFINITY;
+          const rightDelta = right.deltaUsd ?? Number.POSITIVE_INFINITY;
+          return (
+            leftDelta - rightDelta ||
+            (left.item.soldPrice.finalBidUsd ?? Number.POSITIVE_INFINITY) -
+              (right.item.soldPrice.finalBidUsd ?? Number.POSITIVE_INFINITY)
+          );
+        }),
+      medianUsd,
+    };
+  }).sort((left, right) => left.groupLabel.localeCompare(right.groupLabel));
+}
+
+function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
+  const { deltaPercent, deltaUsd, item } = valueItem;
+
   return (
-    <section className="grid gap-3">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight text-balance">Model market</h2>
-          <p className="text-base text-muted-foreground sm:text-sm">
-            Average and median by model in the current view.
-          </p>
+    <a
+      className="grid grid-cols-[auto_1fr] gap-3 rounded-2xl p-2 hover:bg-accent/60"
+      href={`/lots/${item.sourceKey}/${item.lotNumber}`}
+    >
+      <LotImagePreview
+        lot={item}
+        placeholderClassName="h-16 w-24 rounded-xl text-[11px]"
+        thumbClassName="h-16 w-24 rounded-xl bg-muted/30"
+      />
+      <div className="grid min-w-0 gap-2">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate font-medium text-foreground">Lot {item.lotNumber}</div>
+            <div className="truncate text-base text-muted-foreground sm:text-sm">{lotDetails(item)}</div>
+          </div>
+          <Badge variant={deltaVariant(deltaUsd)}>{deltaLabel(deltaUsd)}</Badge>
         </div>
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]">
-        <div className="grid content-start gap-4 rounded-3xl border border-border/70 bg-card/65 p-4">
-          {rows.slice(0, 5).map((row) => (
-            <LeaderboardRow
-              key={row.key}
-              label={row.label}
-              meta={`${formatCount(row.lotCount)} sold · ${formatCount(row.sourceCount)} source${row.sourceCount === 1 ? "" : "s"}`}
-              value={row.averageUsd ?? 0}
-              valueMax={maxAverage}
-            />
-          ))}
-        </div>
-
-        <div className="-mx-3 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-5 lg:mx-0">
-          <div className="inline-block min-w-full px-3 py-2 align-middle sm:px-5 lg:px-0">
-            <table className="w-full text-left text-base sm:text-sm">
-              <thead>
-                <tr className="border-b border-border/70 text-muted-foreground">
-                  <th className="whitespace-nowrap py-3 pr-3 font-medium">Model</th>
-                  <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Lots</th>
-                  <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Average</th>
-                  <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Median</th>
-                  <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Range</th>
-                  <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Volume</th>
-                  <th className="whitespace-nowrap py-3 pl-3 text-right font-medium">Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr className="border-b border-border/70" key={row.key}>
-                    <td className="py-3 pr-3 align-middle">
-                      <div className="font-medium text-foreground">{row.label}</div>
-                      <div className="text-base text-muted-foreground sm:text-sm">
-                        {formatCount(row.sourceCount)} source{row.sourceCount === 1 ? "" : "s"} · {formatCount(row.outlierCount)} outlier{row.outlierCount === 1 ? "" : "s"}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-right align-middle tabular-nums">{formatCount(row.lotCount)}</td>
-                    <td className="px-3 py-3 text-right align-middle font-medium tabular-nums">{formatUsd(row.averageUsd)}</td>
-                    <td className="px-3 py-3 text-right align-middle tabular-nums">{formatUsd(row.medianUsd)}</td>
-                    <td className="px-3 py-3 text-right align-middle tabular-nums">{formatPriceRange(row.minUsd, row.maxUsd)}</td>
-                    <td className="px-3 py-3 text-right align-middle tabular-nums">{formatUsd(row.totalUsd)}</td>
-                    <td className="py-3 pl-3 text-right align-middle tabular-nums">{saleDateLabel(row.latestSaleDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="font-semibold tabular-nums">{formatUsd(item.soldPrice.finalBidUsd)}</div>
+          <div className="text-base tabular-nums text-muted-foreground sm:text-sm">
+            {formatSignedUsd(deltaUsd)} · {formatPercent(deltaPercent)}
           </div>
         </div>
       </div>
-    </section>
+    </a>
   );
 }
 
-function SourceMarket({ props }: { props: SoldPageProps }) {
-  const rows = props.analytics.sourceBreakdown;
-  const maxLots = Math.max(...rows.map((row) => row.lotCount), 0);
+function ValueByModel({ items }: { items: SoldPriceExplorerItem[] }) {
+  const cohorts = valueCohorts(items);
 
   return (
     <section className="grid gap-3">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight text-balance">Source mix</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-balance">Worth by model</h2>
         <p className="text-base text-muted-foreground sm:text-sm">
-          Price and coverage by source for the current filters.
+          Cheapest lots first inside each same-source, same-model, same-year cohort.
         </p>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-3">
-        {rows.map((row) => (
-          <div className="rounded-3xl border border-border/70 bg-card/65 p-4" key={row.key}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="truncate text-base font-semibold">{row.label}</h3>
-                <p className="text-base text-muted-foreground sm:text-sm">
-                  {formatCount(row.modelCount)} model{row.modelCount === 1 ? "" : "s"} · {formatCount(row.outlierCount)} outlier{row.outlierCount === 1 ? "" : "s"}
-                </p>
-              </div>
-              <div className="text-right font-semibold tabular-nums">{formatUsd(row.averageUsd)}</div>
-            </div>
-            <div className="grid gap-2 pt-4">
-              <div className="flex items-center justify-between text-base text-muted-foreground sm:text-sm">
-                <span>{formatCount(row.lotCount)} lots</span>
-                <span className="tabular-nums">{formatPriceRange(row.minUsd, row.maxUsd)}</span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div className="h-full w-(--value-width) rounded-full bg-foreground/70" style={barStyle(row.lotCount, maxLots)} />
-              </div>
-            </div>
-          </div>
-        ))}
-        {rows.length === 0 ? (
-          <div className="rounded-3xl border border-border/70 bg-card/65 p-4 text-base text-muted-foreground sm:text-sm">
-            No source breakdown for these filters.
-          </div>
-        ) : null}
-      </div>
+      {cohorts.length ? (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {cohorts.map((cohort) => {
+            return (
+              <article className="rounded-3xl border border-border/70 bg-card/65 p-3" key={cohort.groupLabel}>
+                <div className="flex flex-wrap items-start justify-between gap-3 px-1 pb-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold">{cohort.groupLabel}</h3>
+                    <p className="text-base text-muted-foreground sm:text-sm">
+                      Median {formatUsd(cohort.medianUsd)} · {formatCount(cohort.items.length)} sold comp{cohort.items.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-1">
+                  {cohort.items.map((valueItem) => (
+                    <ValueLotRow key={valueItem.item.soldPrice.id} valueItem={valueItem} />
+                  ))}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-3xl border border-border/70 bg-card/65 p-4 text-base text-muted-foreground sm:text-sm">
+          No sold comps match these filters.
+        </div>
+      )}
     </section>
   );
 }
@@ -850,8 +842,7 @@ export function SoldPage(props: SoldPageProps) {
         <SoldFilters props={props} />
 
         <div className="grid gap-6">
-          <ModelMarket props={props} />
-          <SourceMarket props={props} />
+          <ValueByModel items={props.items} />
           <OutlierLots items={props.items} />
           <SoldResults items={props.items} />
         </div>
