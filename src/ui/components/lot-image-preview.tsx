@@ -19,7 +19,7 @@ export function LotImagePreview({
     return (
       <div
         className={cn(
-          "flex h-11 w-16 items-center justify-center rounded-xl border border-dashed border-border text-[10px] text-muted-foreground",
+          "flex h-11 w-16 shrink-0 items-center justify-center rounded-xl border border-dashed border-border text-[10px] text-muted-foreground",
           placeholderClassName,
         )}
       >
@@ -35,11 +35,11 @@ export function LotImagePreview({
   return (
     <HoverCard closeDelay={80} openDelay={60}>
       <HoverCardTrigger asChild>
-        <a className="group/image block cursor-zoom-in" href={detailUrl}>
+        <a className="group/image block shrink-0 cursor-zoom-in" href={detailUrl}>
           <img
             alt={lot.lotNumber}
             className={cn(
-              "h-11 w-16 rounded-xl object-cover ring-1 ring-foreground/10 transition-transform duration-200 group-hover/image:scale-[1.04]",
+              "h-11 w-16 max-w-none rounded-xl object-cover ring-1 ring-foreground/10 transition-transform duration-200 group-hover/image:scale-[1.04]",
               thumbClassName,
             )}
             src={src}
