@@ -377,8 +377,8 @@ function OutlierLots({ items }: { items: SoldPriceExplorerItem[] }) {
             >
               <LotImagePreview
                 lot={item}
-                placeholderClassName="size-16 rounded-lg"
-                thumbClassName="size-16 rounded-lg"
+                placeholderClassName="h-20 w-28 rounded-lg text-[11px]"
+                thumbClassName="h-20 w-28 rounded-lg bg-muted/30 ring-border/80 shadow-sm"
               />
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center justify-between gap-2">
@@ -423,8 +423,8 @@ function SoldTable({ items }: { items: SoldPriceExplorerItem[] }) {
                   <div className="flex items-center gap-3">
                     <LotImagePreview
                       lot={item}
-                      placeholderClassName="size-14 rounded-lg"
-                      thumbClassName="size-14 rounded-lg"
+                      placeholderClassName="h-16 w-24 rounded-lg text-[11px]"
+                      thumbClassName="h-16 w-24 rounded-lg bg-muted/30 ring-border/80 shadow-sm"
                     />
                     <div>
                       <a className="font-medium text-foreground underline-offset-2 hover:underline" href={`/lots/${item.sourceKey}/${item.lotNumber}`}>
