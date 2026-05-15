@@ -131,18 +131,6 @@ function SoldLotActions({
   );
 }
 
-function median(values: number[]): number | null {
-  if (!values.length) {
-    return null;
-  }
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  if (sorted.length % 2) {
-    return sorted[middle];
-  }
-  return (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
 function activeFilterCount(filters: SoldPageProps["filters"]): number {
   return [
     filters.q,
@@ -364,153 +352,6 @@ function SoldFilters({ props }: { props: SoldPageProps }) {
   );
 }
 
-function deltaVariant(deltaUsd: number | null): "warning" | "success" | "muted" {
-  if (deltaUsd == null || deltaUsd === 0) {
-    return "muted";
-  }
-  return deltaUsd < 0 ? "success" : "warning";
-}
-
-function deltaLabel(deltaUsd: number | null): string {
-  if (deltaUsd == null) {
-    return "No comp";
-  }
-  if (deltaUsd < 0) {
-    return "Under median";
-  }
-  if (deltaUsd > 0) {
-    return "Over median";
-  }
-  return "At median";
-}
-
-type ValueCohortItem = {
-  deltaPercent: number | null;
-  deltaUsd: number | null;
-  item: SoldPriceExplorerItem;
-};
-
-function valueCohorts(items: SoldPriceExplorerItem[]): Array<{
-  averageUsd: number | null;
-  groupLabel: string;
-  items: ValueCohortItem[];
-  medianUsd: number | null;
-}> {
-  const groups = new Map<string, SoldPriceExplorerItem[]>();
-  for (const item of items) {
-    groups.set(item.stats.groupLabel, [...(groups.get(item.stats.groupLabel) ?? []), item]);
-  }
-
-  return [...groups.entries()].map(([groupLabel, groupItems]) => {
-    const values = groupItems
-      .map((item) => item.soldPrice.finalBidUsd)
-      .filter((value): value is number => value != null && Number.isFinite(value));
-    const averageUsd = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-    const medianUsd = median(values);
-    return {
-      averageUsd,
-      groupLabel,
-      items: groupItems
-        .map((item) => {
-          const price = item.soldPrice.finalBidUsd;
-          const deltaUsd = price == null || medianUsd == null ? null : price - medianUsd;
-          return {
-            deltaPercent: deltaUsd == null || !medianUsd ? null : deltaUsd / medianUsd,
-            deltaUsd,
-            item,
-          };
-        })
-        .sort((left, right) => {
-          const leftDelta = left.deltaUsd ?? Number.POSITIVE_INFINITY;
-          const rightDelta = right.deltaUsd ?? Number.POSITIVE_INFINITY;
-          return (
-            leftDelta - rightDelta ||
-            (left.item.soldPrice.finalBidUsd ?? Number.POSITIVE_INFINITY) -
-              (right.item.soldPrice.finalBidUsd ?? Number.POSITIVE_INFINITY)
-          );
-        }),
-      medianUsd,
-    };
-  }).sort((left, right) => left.groupLabel.localeCompare(right.groupLabel));
-}
-
-function ValueLotRow({ valueItem }: { valueItem: ValueCohortItem }) {
-  const { deltaPercent, deltaUsd, item } = valueItem;
-  const detailHref = lotHref(item);
-
-  return (
-    <div className="grid grid-cols-[auto_1fr] gap-3 rounded-2xl p-2 hover:bg-accent/60">
-      <LotImagePreview
-        lot={item}
-        placeholderClassName="h-16 w-24 rounded-xl text-[11px]"
-        thumbClassName="h-16 w-24 rounded-xl bg-muted/30"
-      />
-      <div className="grid min-w-0 gap-2">
-        <div className="flex min-w-0 items-start justify-between gap-2">
-          <div className="min-w-0">
-            <a className="block truncate font-medium text-foreground underline-offset-2 hover:underline" href={detailHref}>
-              Lot {item.lotNumber}
-            </a>
-            <div className="truncate text-base text-muted-foreground sm:text-sm">{lotDetails(item)}</div>
-          </div>
-          <Badge variant={deltaVariant(deltaUsd)}>{deltaLabel(deltaUsd)}</Badge>
-        </div>
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="font-semibold tabular-nums">{formatUsd(item.soldPrice.finalBidUsd)}</div>
-          <div className="text-base tabular-nums text-muted-foreground sm:text-sm">
-            {formatSignedUsd(deltaUsd)} · {formatPercent(deltaPercent)}
-          </div>
-        </div>
-        <SoldLotActions item={item} />
-      </div>
-    </div>
-  );
-}
-
-function ValueByModel({ items }: { items: SoldPriceExplorerItem[] }) {
-  const cohorts = valueCohorts(items);
-
-  return (
-    <section className="grid gap-3">
-      <div>
-        <h2 className="text-xl font-semibold tracking-tight text-balance">Worth by model</h2>
-        <p className="text-base text-muted-foreground sm:text-sm">
-          Cheapest lots first inside each same-source, same-model, same-year cohort.
-        </p>
-      </div>
-
-      {cohorts.length ? (
-        <div className="grid gap-3 xl:grid-cols-2">
-          {cohorts.map((cohort) => {
-            return (
-              <article className="rounded-3xl border border-border/70 bg-card/65 p-3" key={cohort.groupLabel}>
-                <div className="flex flex-wrap items-start justify-between gap-3 px-1 pb-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-base font-semibold">{cohort.groupLabel}</h3>
-                    <p className="text-base text-muted-foreground sm:text-sm">
-                      Average {formatUsd(cohort.averageUsd)} · Median {formatUsd(cohort.medianUsd)} · {formatCount(cohort.items.length)} sold comp
-                      {cohort.items.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </div>
-                <div className="grid gap-1">
-                  {cohort.items.map((valueItem) => (
-                    <ValueLotRow key={valueItem.item.soldPrice.id} valueItem={valueItem} />
-                  ))}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-3xl border border-border/70 bg-card/65 p-4 text-base text-muted-foreground sm:text-sm">
-          No sold comps match these filters.
-        </div>
-      )}
-    </section>
-  );
-}
-
 function PriceDelta({ item, align = "right" }: { item: SoldPriceExplorerItem; align?: "left" | "right" }) {
   return (
     <div className={cn("grid gap-1", align === "right" && "text-right")}>
@@ -531,52 +372,90 @@ function PriceDelta({ item, align = "right" }: { item: SoldPriceExplorerItem; al
 function OutlierLots({ items }: { items: SoldPriceExplorerItem[] }) {
   const outliers = topOutliers(items);
 
+  if (!outliers.length) {
+    return null;
+  }
+
   return (
     <section className="grid gap-3 border-y border-border/70 py-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-balance">Outlier lots</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-balance">Outliers</h2>
           <p className="text-base text-muted-foreground sm:text-sm">
-            {outliers.length ? `${outliers.length} outside the cohort range` : "No outliers in this view"}
+            {formatCount(outliers.length)} outside the same-source, same-model, same-year range.
           </p>
         </div>
-        {outliers.length > 12 ? (
-          <Badge variant="muted">Top 12 by delta</Badge>
-        ) : null}
+        <Badge variant="muted">Sorted by delta</Badge>
       </div>
 
-      {outliers.length ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {outliers.slice(0, 12).map((item) => (
-            <article
-              className={cn(
-                "grid grid-cols-[auto_1fr] gap-3 rounded-3xl p-3 ring-1 shadow-[0_20px_70px_-62px_rgba(18,18,18,0.55)]",
-                outlierToneClass(item.stats.outlier),
-              )}
-              key={item.soldPrice.id}
-            >
-              <LotImagePreview
-                lot={item}
-                placeholderClassName="h-24 w-32 rounded-2xl text-[11px]"
-                thumbClassName="h-24 w-32 rounded-2xl bg-muted/30"
-              />
-              <div className="grid min-w-0 content-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center justify-between gap-2">
-                    <a className="truncate font-medium text-foreground underline-offset-2 hover:underline" href={lotHref(item)}>
-                      Lot {item.lotNumber}
-                    </a>
+      <div className="-mx-3 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-5">
+        <div className="inline-block min-w-full px-3 py-2 align-middle sm:px-5">
+          <table className="w-full text-left text-base sm:text-sm">
+            <thead>
+              <tr className="border-b border-border/70 text-muted-foreground">
+                <th className="whitespace-nowrap py-3 pr-3 font-medium">Lot</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">Vehicle</th>
+                <th className="whitespace-nowrap px-3 py-3 text-right font-medium">Price check</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">Cohort</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">Sale</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">Location</th>
+                <th className="whitespace-nowrap py-3 pl-3 text-right font-medium">Links</th>
+              </tr>
+            </thead>
+            <tbody>
+              {outliers.map((item) => (
+                <tr
+                  className={cn("border-b border-border/70", outlierToneClass(item.stats.outlier))}
+                  key={item.soldPrice.id}
+                >
+                  <td className="py-3 pr-3 align-middle">
+                    <div className="flex items-center gap-3">
+                      <LotImagePreview
+                        lot={item}
+                        placeholderClassName="h-16 w-28 rounded-2xl text-[11px]"
+                        thumbClassName="h-16 w-28 rounded-2xl bg-muted/30"
+                      />
+                      <div>
+                        <a className="font-medium text-foreground underline-offset-2 hover:underline" href={lotHref(item)}>
+                          Lot {item.lotNumber}
+                        </a>
+                        <div className="text-base text-muted-foreground sm:text-sm">{item.sourceLabel}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="min-w-72 px-3 py-3 align-middle">
+                    <div className="font-medium text-foreground">{lotTitle(item)}</div>
+                    <div className="text-base text-muted-foreground sm:text-sm">{lotDetails(item)}</div>
+                    {item.vin ? <div className="text-sm text-muted-foreground">{item.vin}</div> : null}
+                  </td>
+                  <td className="px-3 py-3 text-right align-middle">
+                    <PriceDelta item={item} />
+                  </td>
+                  <td className="px-3 py-3 align-middle">
                     <Badge variant={outlierVariant(item.stats.outlier)}>{outlierLabel(item.stats.outlier)}</Badge>
-                  </div>
-                  <div className="truncate text-base text-muted-foreground sm:text-sm">{lotTitle(item)}</div>
-                </div>
-                <PriceDelta align="left" item={item} />
-                <SoldLotActions item={item} />
-              </div>
-            </article>
-          ))}
+                    <div className="mt-1 text-base text-muted-foreground sm:text-sm">{item.stats.groupLabel}</div>
+                  </td>
+                  <td className="px-3 py-3 align-middle">
+                    <div className="tabular-nums">{saleDateLabel(item.soldPrice.saleDate)}</div>
+                    {item.soldPrice.foundAt ? (
+                      <LocalizedDateText
+                        className="text-base text-muted-foreground sm:text-sm"
+                        emptyLabel=""
+                        format="timestamp"
+                        iso={item.soldPrice.foundAt}
+                      />
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-3 align-middle">{lotLocation(item)}</td>
+                  <td className="py-3 pl-3 text-right align-middle">
+                    <SoldLotActions className="justify-end" item={item} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : null}
+      </div>
     </section>
   );
 }
@@ -752,7 +631,6 @@ export function SoldPage(props: SoldPageProps) {
         <SoldFilters props={props} />
 
         <div className="grid gap-6">
-          <ValueByModel items={props.items} />
           <OutlierLots items={props.items} />
           <SoldResults items={props.items} />
         </div>
