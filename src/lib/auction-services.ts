@@ -1,5 +1,5 @@
 import "@tanstack/react-start/server-only";
-import { AuctionD1Store } from "@/models/auction-store-d1";
+import { AuctionD1Store } from "@/models/auction-store-d1-joined";
 import { getAuctionConfig } from "@/lib/config";
 import { getD1, getImageBucket } from "@/utils/env";
 
