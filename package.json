@@ -14,6 +14,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler --config ./wrangler.jsonc d1 migrations apply auction --local",
     "db:apply-prod": "wrangler --config ./wrangler.jsonc d1 migrations apply auction --remote",
+    "db:sync-prod": "mkdir -p .wrangler && wrangler --config ./wrangler.jsonc d1 export auction --remote --output .wrangler/auction-prod.sql -y && rm -rf .wrangler/state/v3/d1 && wrangler --config ./wrangler.jsonc d1 execute auction --local --command \"select 1\" -y >/dev/null && sqlite3 \"$(find .wrangler/state/v3/d1/miniflare-D1DatabaseObject -name '*.sqlite' ! -name 'metadata.sqlite' -print -quit)\" 'PRAGMA foreign_keys=OFF;' '.read .wrangler/auction-prod.sql'",
     "collector:headed": "bash ./scripts/run-headed-collector.sh",
     "sold-prices:headed": "bash ./scripts/run-sold-price-runner.sh",
     "collector:bootstrap": "bun collector/bootstrap.ts --public-key-file ./runner-keys/collector-signing-key.pub.pem",
