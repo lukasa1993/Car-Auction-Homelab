@@ -12,7 +12,7 @@ export type LiveEventPayload = {
 };
 
 type LiveEventMessage = {
-  type: "collector_sync" | "connected" | "pong";
+  type: "collector_sync";
   payload: LiveEventPayload;
 };
 
@@ -20,25 +20,34 @@ type LiveEventsEnv = Env & {
   AUCTION_EVENTS: DurableObjectNamespace<AuctionEvents>;
 };
 
+type LiveEventsClient = {
+  enqueue: (chunk: string) => void;
+  close: () => void;
+};
+
+const encoder = new TextEncoder();
+
 function getAuctionEventsStub(): DurableObjectStub<AuctionEvents> {
   const namespace = (env as LiveEventsEnv).AUCTION_EVENTS;
   return namespace.get(namespace.idFromName("global"));
 }
 
-function expectedWebSocketResponse(): Response {
-  return new Response("Expected WebSocket upgrade", {
-    status: 426,
-    headers: {
-      upgrade: "websocket",
-    },
-  });
+function eventStreamHeaders(): HeadersInit {
+  return {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    "content-encoding": "identity",
+  };
+}
+
+function formatSseEvent(message: LiveEventMessage): string {
+  const data = JSON.stringify(message.payload);
+  return [`event: ${message.type}`, ...data.split(/\r?\n/).map((line) => `data: ${line}`), ""].join(
+    "\n",
+  );
 }
 
 export async function connectAuctionEvents(request: Request): Promise<Response> {
-  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return expectedWebSocketResponse();
-  }
-
   return await getAuctionEventsStub().fetch(request);
 }
 
@@ -69,6 +78,8 @@ function isLiveEventMessage(value: unknown): value is LiveEventMessage {
 }
 
 export class AuctionEvents extends DurableObject<Env> {
+  private readonly clients = new Map<string, LiveEventsClient>();
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -84,52 +95,92 @@ export class AuctionEvents extends DurableObject<Env> {
       });
     }
 
-    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-      return expectedWebSocketResponse();
+    if (request.method !== "GET") {
+      return new Response("Method not allowed", { status: 405 });
     }
 
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    return this.connect(request);
+  }
 
-    this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ connectedAt: new Date().toISOString() });
-    server.send(
-      JSON.stringify({
-        type: "connected",
-        payload: { timestamp: new Date().toISOString() },
-      } satisfies LiveEventMessage),
-    );
+  private connect(request: Request): Response {
+    const clientId = crypto.randomUUID();
+    const queue: string[] = [];
+    let closed = false;
+    let wake: (() => void) | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-    return new Response(null, {
-      status: 101,
-      webSocket: client,
+    const waitForChunk = () =>
+      new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+
+    const enqueue = (chunk: string) => {
+      if (closed) return;
+      queue.push(chunk);
+      wake?.();
+      wake = null;
+    };
+
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat != null) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      this.clients.delete(clientId);
+      wake?.();
+      wake = null;
+    };
+
+    const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        this.clients.set(clientId, { enqueue, close: cleanup });
+        enqueue("retry: 3000\n: connected\n\n");
+        heartbeat = setInterval(() => enqueue(": keep-alive\n\n"), 25000);
+
+        const pump = async () => {
+          try {
+            while (!closed) {
+              if (queue.length === 0) {
+                await waitForChunk();
+              }
+              while (!closed && queue.length > 0) {
+                controller.enqueue(encoder.encode(queue.shift()!));
+              }
+            }
+          } finally {
+            cleanup();
+            try {
+              controller.close();
+            } catch {
+              // Stream was already cancelled by the client.
+            }
+          }
+        };
+
+        void pump();
+      },
+      cancel: cleanup,
+    });
+
+    request.signal.addEventListener("abort", cleanup, { once: true });
+
+    return new Response(stream, {
+      headers: eventStreamHeaders(),
     });
   }
 
-  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (message !== "ping") return;
-    ws.send(
-      JSON.stringify({
-        type: "pong",
-        payload: { timestamp: new Date().toISOString() },
-      } satisfies LiveEventMessage),
-    );
-  }
-
-  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
-    ws.close(code, reason);
-  }
-
   private broadcast(message: LiveEventMessage): number {
-    const serialized = JSON.stringify(message);
+    const chunk = formatSseEvent(message);
     let delivered = 0;
 
-    for (const socket of this.ctx.getWebSockets()) {
+    for (const client of this.clients.values()) {
       try {
-        socket.send(serialized);
+        client.enqueue(chunk);
         delivered += 1;
       } catch {
-        socket.close(1011, "Failed to deliver live event");
+        client.close();
       }
     }
 
