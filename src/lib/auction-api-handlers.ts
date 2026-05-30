@@ -1,6 +1,7 @@
 import "@tanstack/react-start/server-only";
 import { auth, getAuthState, requireBearer } from "@/lib/auth";
 import { getRuntimeConfig, getAuctionStore } from "@/lib/auction-services";
+import { publishCollectorSync } from "@/lib/live-events";
 import type {
   IngestPayload,
   SoldPriceResultInput,
@@ -57,10 +58,23 @@ export async function handleIngest(request: Request): Promise<Response> {
   const store = await getAuctionStore();
   const result = await store.ingest(payload);
   const blacklistSweep = await store.applyTargetBlacklistToExistingLots();
-  return Response.json({
+  const summary = {
     ...result,
     blacklistRejected: blacklistSweep.updated,
+  };
+
+  await publishCollectorSync({
+    title: "Collector sync complete",
+    message: `Collector synced ${summary.upserted} lots${summary.missingMarked ? ` and marked ${summary.missingMarked} missing` : ""}.`,
+    runId: summary.runId,
+    upserted: summary.upserted,
+    missingMarked: summary.missingMarked,
+    blacklistRejected: summary.blacklistRejected,
+  }).catch((error) => {
+    console.warn("Failed to publish collector sync event", error);
   });
+
+  return Response.json(summary);
 }
 
 export async function handleTargetUpdates(request: Request): Promise<Response> {
