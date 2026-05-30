@@ -9,6 +9,14 @@ type LiveToast = {
   message: string;
 };
 
+type LiveEventMessage = {
+  type?: string;
+  payload?: {
+    title?: string;
+    message?: string;
+  };
+};
+
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -166,38 +174,77 @@ export function AppShell({ children, auth }: { children: React.ReactNode; auth: 
   }, []);
 
   React.useEffect(() => {
-    if (typeof window === "undefined" || !("EventSource" in window)) {
+    if (typeof window === "undefined" || !("WebSocket" in window)) {
       return;
     }
 
-    const source = new EventSource("/events");
-    const handleCollectorSync = (event: Event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as {
-          title?: string;
-          message?: string;
-        };
-        setToasts((current) =>
-          [
-            {
-              id: nextToastId.current++,
-              title: payload.title || "Live update",
-              message: payload.message || "Collector activity detected.",
-            },
-            ...current,
-          ].slice(0, 4),
-        );
-        setBannerMessage(payload.message || "New collector sync available. Refresh to load it.");
-      } catch {
-        // Ignore malformed event payloads.
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let pingTimer: number | null = null;
+    let closed = false;
+
+    const clearTimers = () => {
+      if (reconnectTimer != null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (pingTimer != null) {
+        window.clearInterval(pingTimer);
+        pingTimer = null;
       }
     };
 
-    source.addEventListener("collector_sync", handleCollectorSync as EventListener);
+    const connect = () => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${protocol}//${window.location.host}/events`);
+
+      socket.addEventListener("open", () => {
+        if (pingTimer != null) window.clearInterval(pingTimer);
+        pingTimer = window.setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) {
+            socket.send("ping");
+          }
+        }, 30000);
+      });
+
+      socket.addEventListener("message", (event) => {
+        try {
+          const message = JSON.parse(String(event.data)) as LiveEventMessage;
+          if (message.type !== "collector_sync") return;
+          const payload = message.payload ?? {};
+          setToasts((current) =>
+            [
+              {
+                id: nextToastId.current++,
+                title: payload.title || "Live update",
+                message: payload.message || "Collector activity detected.",
+              },
+              ...current,
+            ].slice(0, 4),
+          );
+          setBannerMessage(payload.message || "New collector sync available. Refresh to load it.");
+        } catch {
+          // Ignore malformed event payloads.
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        if (pingTimer != null) {
+          window.clearInterval(pingTimer);
+          pingTimer = null;
+        }
+        if (!closed) {
+          reconnectTimer = window.setTimeout(connect, 3000);
+        }
+      });
+    };
+
+    connect();
 
     return () => {
-      source.removeEventListener("collector_sync", handleCollectorSync as EventListener);
-      source.close();
+      closed = true;
+      clearTimers();
+      socket?.close();
     };
   }, []);
 
