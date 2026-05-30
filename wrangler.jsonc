@@ -29,6 +29,20 @@
     "AUCTION_COLLECTOR_VERSION": "2026.04.06.2",
     "AUCTION_MINIMUM_RUNNER_VERSION": "2026.04.06.2",
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUCTION_EVENTS",
+        "class_name": "AuctionEvents",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AuctionEvents"],
+    },
+  ],
   "d1_databases": [
     {
       "binding": "d1",
