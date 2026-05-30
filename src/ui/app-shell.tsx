@@ -180,32 +180,11 @@ export function AppShell({ children, auth }: { children: React.ReactNode; auth: 
 
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
-    let pingTimer: number | null = null;
     let closed = false;
-
-    const clearTimers = () => {
-      if (reconnectTimer != null) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      if (pingTimer != null) {
-        window.clearInterval(pingTimer);
-        pingTimer = null;
-      }
-    };
 
     const connect = () => {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(`${protocol}//${window.location.host}/events`);
-
-      socket.addEventListener("open", () => {
-        if (pingTimer != null) window.clearInterval(pingTimer);
-        pingTimer = window.setInterval(() => {
-          if (socket?.readyState === WebSocket.OPEN) {
-            socket.send("ping");
-          }
-        }, 30000);
-      });
 
       socket.addEventListener("message", (event) => {
         try {
@@ -229,10 +208,6 @@ export function AppShell({ children, auth }: { children: React.ReactNode; auth: 
       });
 
       socket.addEventListener("close", () => {
-        if (pingTimer != null) {
-          window.clearInterval(pingTimer);
-          pingTimer = null;
-        }
         if (!closed) {
           reconnectTimer = window.setTimeout(connect, 3000);
         }
@@ -243,7 +218,9 @@ export function AppShell({ children, auth }: { children: React.ReactNode; auth: 
 
     return () => {
       closed = true;
-      clearTimers();
+      if (reconnectTimer != null) {
+        window.clearTimeout(reconnectTimer);
+      }
       socket?.close();
     };
   }, []);
