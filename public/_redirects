@@ -1,0 +1,2 @@
+# Use the extensionless asset URL to avoid Cloudflare's HTML canonicalization redirect.
+/vin/* /vin 200

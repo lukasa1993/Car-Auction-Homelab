@@ -30,16 +30,41 @@ const TESLA_MODEL_BY_CODE = {
     copartSlug: "model-y",
     iaaiPath: "Model Y",
   },
+  C: {
+    label: "Cybertruck",
+    carType: "Tesla Cybertruck",
+    copartSlug: "cybertruck",
+    iaaiPath: "Cybertruck",
+  },
+  T: {
+    label: "Semi",
+    carType: "Tesla Semi",
+    copartSlug: "semi",
+    iaaiPath: "Semi",
+  },
+  A: {
+    label: "Cybercab",
+    carType: "Tesla Cybercab",
+    copartSlug: "cybercab",
+    iaaiPath: "Cybercab",
+  },
 } as const;
 
 const TESLA_WMI_INFO: Record<string, string> = {
-  "5YJ": "Tesla, Inc. – Fremont, CA / Austin, TX",
-  "7SA": "Tesla, Inc. – Gigafactory Austin, TX",
-  LRW: "Tesla, Inc. – Gigafactory Shanghai",
-  XP7: "Tesla, Inc. – Gigafactory Berlin",
+  "5YJ": "Tesla, Inc. – United States",
+  "7SA": "Tesla, Inc. – United States – Model X / Model Y",
+  "7G2": "Tesla, Inc. – United States – Trucks",
+  LRW: "Tesla (Shanghai) – China",
+  XP7: "Tesla Manufacturing Brandenburg – Germany",
 };
 const TESLA_WMI_PREFIXES = Object.keys(TESLA_WMI_INFO);
-const TESLA_MODEL_Y_EXCLUSIVE_WMI = new Set(["7SA", "XP7"]);
+const TESLA_MODELS_BY_WMI: Record<string, readonly string[]> = {
+  "5YJ": ["S", "3", "X", "Y", "A"],
+  "7SA": ["X", "Y"],
+  "7G2": ["C", "T"],
+  LRW: ["3", "Y"],
+  XP7: ["Y"],
+};
 
 const MODEL_YEAR_BY_CODE: Record<string, number> = {
   A: 2010,
@@ -142,11 +167,13 @@ export function inferTeslaModel(value: string) {
     return null;
   }
   const wmi = normalized.slice(0, 3);
-  const directModel = TESLA_MODEL_BY_CODE[normalized[3] as keyof typeof TESLA_MODEL_BY_CODE];
-  if (directModel) {
-    return directModel;
+  const modelCode = normalized[3];
+  if (modelCode && modelCode !== VIN_WILDCARD) {
+    return TESLA_MODELS_BY_WMI[wmi]?.includes(modelCode)
+      ? TESLA_MODEL_BY_CODE[modelCode as keyof typeof TESLA_MODEL_BY_CODE]
+      : null;
   }
-  if (TESLA_MODEL_Y_EXCLUSIVE_WMI.has(wmi)) {
+  if (wmi === "XP7") {
     return TESLA_MODEL_BY_CODE.Y;
   }
   return null;
@@ -155,7 +182,7 @@ export function inferTeslaModel(value: string) {
 export type TeslaDecodeResult = {
   wmi: string;
   wmiMeaning: string;
-  modelLabel: "Model 3" | "Model S" | "Model X" | "Model Y";
+  modelLabel: (typeof TESLA_MODEL_BY_CODE)[keyof typeof TESLA_MODEL_BY_CODE]["label"];
   carType: string;
   copartSlug: string;
   iaaiPath: string;
@@ -171,13 +198,7 @@ export function decodeTeslaVin(value: string): TeslaDecodeResult | null {
   if (!TESLA_WMI_PREFIXES.includes(wmi)) {
     return null;
   }
-  const modelCode = normalized[3];
-  let model: (typeof TESLA_MODEL_BY_CODE)[keyof typeof TESLA_MODEL_BY_CODE] | null = null;
-  if (modelCode && modelCode !== VIN_WILDCARD && TESLA_MODEL_BY_CODE[modelCode as keyof typeof TESLA_MODEL_BY_CODE]) {
-    model = TESLA_MODEL_BY_CODE[modelCode as keyof typeof TESLA_MODEL_BY_CODE];
-  } else if ((!modelCode || modelCode === VIN_WILDCARD) && TESLA_MODEL_Y_EXCLUSIVE_WMI.has(wmi)) {
-    model = TESLA_MODEL_BY_CODE.Y;
-  }
+  const model = inferTeslaModel(normalized);
   if (!model) {
     return null;
   }
@@ -185,7 +206,9 @@ export function decodeTeslaVin(value: string): TeslaDecodeResult | null {
   if (!yearCode || yearCode === VIN_WILDCARD) {
     return null;
   }
-  const year = MODEL_YEAR_BY_CODE[yearCode];
+  // Non-Roadster Teslas use the 2010–2039 cycle; numeric codes are 2031–2039.
+  const baseYear = MODEL_YEAR_BY_CODE[yearCode];
+  const year = baseYear && baseYear < 2010 ? baseYear + 30 : baseYear;
   if (!year) {
     return null;
   }

@@ -1,0 +1,262 @@
+{
+  "2012": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2012&make=Tesla",
+    "models": [
+      "Model S"
+    ]
+  },
+  "2013": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2013&make=Tesla",
+    "models": [
+      "Model S (40 kW-hr battery pack)",
+      "Model S (60 kW-hr battery pack)",
+      "Model S (85 kW-hr battery pack)"
+    ]
+  },
+  "2014": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2014&make=Tesla",
+    "models": [
+      "Model S (60 kW-hr battery pack)",
+      "Model S (85 kW-hr battery pack)",
+      "Model S AWD (85 kW-hr battery pack)"
+    ]
+  },
+  "2015": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2015&make=Tesla",
+    "models": [
+      "Model S (60 kW-hr battery pack)",
+      "Model S (85 kW-hr battery pack)",
+      "Model S (90 kW-hr battery pack)",
+      "Model S AWD - 70D",
+      "Model S AWD - 85D",
+      "Model S AWD - 90D",
+      "Model S AWD - P85D",
+      "Model S AWD - P90D"
+    ]
+  },
+  "2016": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2016&make=Tesla",
+    "models": [
+      "Model S (60 kW-hr battery pack)",
+      "Model S (70 kW-hr battery pack)",
+      "Model S (75 kW-hr battery pack)",
+      "Model S (85 kW-hr battery pack)",
+      "Model S (90 kW-hr battery pack)",
+      "Model S AWD - 60D",
+      "Model S AWD - 70D",
+      "Model S AWD - 75D",
+      "Model S AWD - 85D",
+      "Model S AWD - 90D",
+      "Model S AWD - P100D",
+      "Model S AWD - P85D",
+      "Model S AWD - P90D",
+      "Model X AWD - 60D",
+      "Model X AWD - 75D",
+      "Model X AWD - 90D",
+      "Model X AWD - P100D",
+      "Model X AWD - P90D"
+    ]
+  },
+  "2017": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2017&make=Tesla",
+    "models": [
+      "Model 3 Long Range",
+      "Model S (60 kW-hr battery pack)",
+      "Model S (75 kW-hr battery pack)",
+      "Model S AWD - 100D",
+      "Model S AWD - 60D",
+      "Model S AWD - 75D",
+      "Model S AWD - 90D",
+      "Model S AWD - P100D",
+      "Model S AWD - P90D",
+      "Model X AWD - 100D",
+      "Model X AWD - 60D",
+      "Model X AWD - 75D",
+      "Model X AWD - 90D",
+      "Model X AWD - P100D",
+      "Model X AWD - P90D"
+    ]
+  },
+  "2018": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2018&make=Tesla",
+    "models": [
+      "Model 3 Long Range",
+      "Model 3 Long Range  AWD",
+      "Model 3 Long Range  AWD Performance",
+      "Model 3 Mid Range",
+      "Model S 100D",
+      "Model S 75D",
+      "Model S 75kWh",
+      "Model S P100D",
+      "Model X 100D",
+      "Model X 75D",
+      "Model X P100D"
+    ]
+  },
+  "2019": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2019&make=Tesla",
+    "models": [
+      "Model 3 Long Range",
+      "Model 3 Long Range AWD",
+      "Model 3 Long Range AWD Performance",
+      "Model 3 Mid Range",
+      "Model 3 Standard Range",
+      "Model 3 Standard Range Plus",
+      "Model S 100D",
+      "Model S 75D",
+      "Model S Long Range",
+      "Model S P100D",
+      "Model S Performance (19in Wheels)",
+      "Model S Performance (21in Wheels)",
+      "Model S Standard Range",
+      "Model X 100D",
+      "Model X 75D",
+      "Model X Long Range",
+      "Model X P100D",
+      "Model X Performance (22in Wheels)"
+    ]
+  },
+  "2020": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2020&make=Tesla",
+    "models": [
+      "Model 3 Long Range",
+      "Model 3 Long Range AWD",
+      "Model 3 Long Range Performance AWD (18in)",
+      "Model 3 Long Range Performance AWD (19in)",
+      "Model 3 Long Range Performance AWD (20in)",
+      "Model 3 Mid Range",
+      "Model 3 Standard Range",
+      "Model 3 Standard Range Plus",
+      "Model S Long Range",
+      "Model S Long Range Plus",
+      "Model S Performance (19in Wheels)",
+      "Model S Performance (21in Wheels)",
+      "Model S Standard Range",
+      "Model X Long Range",
+      "Model X Long Range Plus",
+      "Model X Performance (20in Wheels)",
+      "Model X Performance (22in Wheels)",
+      "Model X Standard Range",
+      "Model Y Long Range AWD",
+      "Model Y Performance AWD",
+      "Model Y Performance AWD (21in Wheels)"
+    ]
+  },
+  "2021": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2021&make=Tesla",
+    "models": [
+      "Model 3 Long Range AWD",
+      "Model 3 Performance AWD",
+      "Model 3 Standard Range Plus RWD",
+      "Model S Long Range",
+      "Model S Performance (19in Wheels)",
+      "Model S Performance (21in Wheels)",
+      "Model S Plaid (21inch wheels)",
+      "Model X Long Range Plus",
+      "Model X Performance (20in Wheels)",
+      "Model X Performance (22in Wheels)",
+      "Model Y Long Range AWD",
+      "Model Y Performance AWD",
+      "Model Y Standard Range RWD"
+    ]
+  },
+  "2022": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2022&make=Tesla",
+    "models": [
+      "Model 3 Long Range AWD",
+      "Model 3 Performance AWD",
+      "Model 3 RWD",
+      "Model S",
+      "Model S Plaid (19 inch wheels)",
+      "Model S Plaid (21 inch wheels)",
+      "Model X",
+      "Model X Plaid (20 inch wheels)",
+      "Model X Plaid (22 inch wheels)",
+      "Model Y AWD",
+      "Model Y Long Range AWD",
+      "Model Y Performance AWD",
+      "Model Y RWD"
+    ]
+  },
+  "2023": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2023&make=Tesla",
+    "models": [
+      "Model 3 Long Range AWD",
+      "Model 3 Performance AWD",
+      "Model 3 RWD",
+      "Model S",
+      "Model X",
+      "Model X Plaid (20 inch wheels)",
+      "Model X Plaid (22 inch wheels)",
+      "Model Y AWD",
+      "Model Y Long Range AWD",
+      "Model Y Performance AWD"
+    ]
+  },
+  "2024": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2024&make=Tesla",
+    "models": [
+      "Model 3 Long Range AWD",
+      "Model 3 Long Range AWD-E",
+      "Model 3 Long Range RWD",
+      "Model 3 Performance AWD",
+      "Model 3 RWD",
+      "Model S",
+      "Model S Plaid (19in wheels)",
+      "Model S Plaid (21in wheels)",
+      "Model X",
+      "Model X Plaid (20in wheels)",
+      "Model X Plaid (22in wheels)",
+      "Model Y Long Range AWD",
+      "Model Y Long Range AWD-I",
+      "Model Y Long Range RWD",
+      "Model Y Performance AWD",
+      "Model Y RWD"
+    ]
+  },
+  "2025": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2025&make=Tesla",
+    "models": [
+      "Cybertruck AWD",
+      "Cybertruck Long Range",
+      "Cybertruck Long Range (20in Cyber wheels)",
+      "Model 3 Long Range AWD",
+      "Model 3 Long Range RWD",
+      "Model 3 Long Range RWD-I (19in wheels)",
+      "Model 3 Performance AWD",
+      "Model S",
+      "Model S Plaid (19in wheels)",
+      "Model S Plaid (21in wheels)",
+      "Model X",
+      "Model X Plaid (20in wheels)",
+      "Model X Plaid (22in wheels)",
+      "Model Y Long Range AWD",
+      "Model Y Long Range RWD",
+      "Model Y Performance AWD"
+    ]
+  },
+  "2026": {
+    "source": "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2026&make=Tesla",
+    "models": [
+      "Cybertruck AWD",
+      "Cybertruck Dual Motor AWD",
+      "Cybertruck Long Range (20in Cyber wheels)",
+      "Model 3 Performance",
+      "Model 3 Performance AWD",
+      "Model 3 Premium AWD",
+      "Model 3 Premium RWD",
+      "Model 3 Standard RWD",
+      "Model S",
+      "Model S Plaid",
+      "Model S Plaid (21in wheels)",
+      "Model X",
+      "Model X Plaid",
+      "Model Y Long Range AWD",
+      "Model Y Long Range RWD",
+      "Model Y Performance AWD",
+      "Model Y Standard AWD",
+      "Model Y Standard RWD (18in Wheels)",
+      "Model Y Standard RWD (19in Wheels)"
+    ]
+  }
+}

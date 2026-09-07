@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:vin": "node --test scripts/tesla-vin.test.mjs",
     "setup:env": "bun scripts/generate-env.ts",
     "collector:release": "bun scripts/publish-collector-release.ts",
     "dev": "vp dev",
